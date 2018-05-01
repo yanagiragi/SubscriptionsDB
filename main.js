@@ -104,7 +104,7 @@ setInterval(function(){
 
 ipc.serve(() => {
 	ipc.server.on('RagiDB.Noticed', message => {
-		taskQueue.push([NoticeData, message])
+		taskQueue.push([NoticeEntry, message])
 	})
 	ipc.server.on('RagiDB.Add', message => {
 		taskQueue.push([Add, message])
@@ -193,9 +193,21 @@ function CheckExisted(containerId, data)
 	return existed
 }
 
-function Add([containerType, data])
+function GetContainerId(containerType, nickname)
 {
-	let containerId = container.types.indexOf(containerType)
+	let typeId = container.types.indexOf(containerType)
+	let idx = -1
+	for(idx in container.container){
+		if(container.container[idx].nickname == nickname && container.container[idx].typeId == typeId){
+			break
+		}
+	}
+	return idx >= container.container.length ? -1 : idx
+}
+
+function Add([containerType, nickname, data])
+{
+	let containerId = GetContainerId(containerType, nickname)//container.types.indexOf(containerType)
 
 	var existed = CheckExisted(containerId, data)
 	
