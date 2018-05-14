@@ -214,6 +214,10 @@ function Add([containerType, nickname, data])
 	if(data && data.title && data.href && data.img && !existed)
 	{
 		dirty = true;
+		
+		// get current id
+		data.id =parseInt( container.container[containerId].list[container.container[containerId].list.length - 1].id) + 1
+		
 		container.container[containerId].list.push(data)
 		logger.log({
 			level: 'info',
