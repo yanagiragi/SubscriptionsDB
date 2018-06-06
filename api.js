@@ -40,10 +40,15 @@ function AddEntry(entry)
 	return new Promise((resolve, reject) => {
 		
 		if(!ipc.of[processName]){
-			ipc.connectTo(processName, () => {})
+			ipc.connectTo(processName, () => {
+				ipc.of[processName].on('connect', () => {
+					resolve(ipc.of[processName].emit('RagiDB.Add', entry))
+				})
+			})
 		}
-		
-		resolve(ipc.of[processName].emit('RagiDB.Add', entry))
+		else{
+			resolve(ipc.of[processName].emit('RagiDB.Add', entry))
+		}
 	})
 }
 

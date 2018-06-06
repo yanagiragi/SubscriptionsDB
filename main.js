@@ -103,6 +103,12 @@ setInterval(function(){
 // set up APIs
 
 ipc.serve(() => {
+	ipc.server.on('connect', () => {
+		logger.log({
+			level: 'info',
+			message: `client connected.`
+		})
+	})
 	ipc.server.on('RagiDB.Noticed', message => {
 		taskQueue.push([NoticeEntry, message])
 	})
@@ -113,7 +119,10 @@ ipc.serve(() => {
 		readQueue.push([ReadDB, socket])
 	})
 	ipc.server.on('socket.disconnected', (socket, destroyedSocketID) => {
-		// console.log('socket ' + destroyedSocketID)
+		logger.log({
+			level: 'info',
+			message: `client<${destroyedSocketID}> connected.`
+		})
 	})
 });
 
