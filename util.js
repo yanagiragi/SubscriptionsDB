@@ -2,6 +2,12 @@ const fs = require('fs')
 const dataPath = './container.json'
 var container = JSON.parse(fs.readFileSync(dataPath))
 
+/*
+*	一些用來 migrate 原本格式到現在格式的程式
+*
+*	一次性，所以寫得有點亂
+*/
+
 reMap2()
 
 function listType()
@@ -75,15 +81,9 @@ function reMap2()
 
 /*
 {
-	"schema": 
-	[
-		{
-			// id = index
-			"typeName": baidu,
-		},
-		{
-			"typeName": ruten
-		}
+	"types": [
+		"baidu",
+		"ruten"
 	],
 
 	"container":
@@ -92,8 +92,7 @@ function reMap2()
 			"id": 0,
 			"typeId" : 1,
 			"nickName": "MMD Teiba",
-			"list" : 
-			[
+			"list" : [
 				{
 					"id": 0,
 					"title": "",
@@ -102,9 +101,6 @@ function reMap2()
 					"isNoticed": ""
 				}
 			]
-		},
-		{
-
 		}
 	]
 }
