@@ -14,7 +14,10 @@ const logger = createLogger({
 		timestamp(),
 		myFormat
 	),
-	transports: [new transports.Console()]
+	transports: [
+		new transports.Console({ level: 'info' }),
+		new transports.File({ filename: 'RagiDB.log', level: 'debug'}),
+	]
 })
 
 // path to container.json
@@ -41,7 +44,7 @@ event.on('RagiDB.DealAction.Task', () => {
 	let [ action, param ] = taskQueue[0]	
 	
 	logger.log({
-		level: 'info',
+		level: 'debug',
 		message: `Dequeue Event: <${action.name}, ${param[0]}, ${param[1]}>`
 	})
 
@@ -61,7 +64,7 @@ event.on('RagiDB.DealAction.Save', () => {
 event.on('RagiDB.DealAction.Read', () => {
 	
 	logger.log({
-		level: 'info',
+		level: 'debug',
 		message: 'Dealing Read Requests, ' + (dirty ? 'Using Cache' : "Remain Same")
 	})
 	
@@ -105,7 +108,7 @@ setInterval(function(){
 ipc.serve(() => {
 	ipc.server.on('connect', () => {
 		logger.log({
-			level: 'info',
+			level: 'debug',
 			message: `client connected.`
 		})
 	})
@@ -120,7 +123,7 @@ ipc.serve(() => {
 	})
 	ipc.server.on('socket.disconnected', (socket, destroyedSocketID) => {
 		logger.log({
-			level: 'info',
+			level: 'debug',
 			message: `client<${destroyedSocketID}> connected.`
 		})
 	})
@@ -166,6 +169,7 @@ function NoticeEntry([containerId, listId])
 		dirty = true;
 		
 		logger.log({
+			console: 'true',
 			level: 'info',
 			message: `Read ContainerId<${containerId}> & ListId<${listId}>, title = ${container.container[containerId].list[listId].title}`
 		});
@@ -218,6 +222,31 @@ function Add([containerType, nickname, data])
 {
 	let containerId = GetContainerId(containerType, nickname)//container.types.indexOf(containerType)
 
+	if(container.types[container.container[containerId].typeId] != containerType){
+		logger.log({
+			level: 'info',
+			message: `mapping ${containerType} ${nickname} to ${containerId} Failed. Create new container.container`
+		})
+
+		var i;
+		for(i = 0; i < container.types.length; ++i)
+			if(container.types[i] == containerType)
+				break
+
+		container.container.push({
+			"typeId": i,
+			"nickname": nickname,
+			"list": [],
+			"id": parseInt(containerId) + 1
+		})
+		
+		if ( i >= container.types.length){
+			container.types.push(containerType)
+		}
+
+		containerId = GetContainerId(containerType, nickname)//container.types.indexOf(containerType)
+	}
+
 	var existed = CheckExisted(containerId, data)
 	
 	if(data && data.title && data.href && data.img && !existed)
@@ -225,7 +254,9 @@ function Add([containerType, nickname, data])
 		dirty = true;
 		
 		// get current id
-		data.id =parseInt( container.container[containerId].list[container.container[containerId].list.length - 1].id) + 1
+
+		var lastDataInContainer = container.container[containerId].list[container.container[containerId].list.length - 1]
+		data.id = (lastDataInContainer) ? parseInt(lastDataInContainer.id) + 1 : 0
 		
 		container.container[containerId].list.push(data)
 		logger.log({
@@ -236,7 +267,7 @@ function Add([containerType, nickname, data])
 	else{
 		if(existed){
 			logger.log({
-				level: 'info',
+				level: 'debug',
 				message: `Entry existed, title = <${data.title}>`
 			})
 		}
