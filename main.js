@@ -324,7 +324,7 @@ function CheckExisted(containerId, data)
 function GetContainerId(containerType, nickname)
 {
 	let typeId = container.types.indexOf(containerType)
-	let idx = -1
+	var idx = -1
 	for(idx in container.container){
 		if(container.container[idx].nickname == nickname && container.container[idx].typeId == typeId){
 			break
@@ -369,7 +369,7 @@ function Add([containerType, nickname, data])
 			"typeId": i,
 			"nickname": nickname,
 			"list": [],
-			"id": parseInt(containerId) + 1
+			"id": parseInt(container.container[container.container.length - 1].id)  + 1
 		})
 		
 		if ( i >= container.types.length ){
