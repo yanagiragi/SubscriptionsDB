@@ -2,38 +2,11 @@ const fs = require('fs')
 const ipc = require('node-ipc')
 const EventEmitter = require('events').EventEmitter
 const { createLogger, format, transports } = require('winston')
+const Transport = require('winston-transport')
 const { combine, timestamp, label, printf } = format
+const blessed = require('blessed')
 
-
-/*
-*	設定 Logger 的格式
-*/
-
-const myFormat = printf(info => {
-	return `${info.timestamp} [${info.label}] ${info.level}: ${info.message}`
-})
-
-
-/*
-*	專案使用的三個 Level: 
-*		1. debug: 所有資訊 
-*		2. info : 只顯示必要資訊 (給 Console 介面看的)
-*		3. error: 重大錯誤 (亦會顯示在 Console)
-*/
-
-const logger = createLogger({
-	format: combine(
-		label({ label: 'RagiDB' }),
-		timestamp(),
-		myFormat
-	),
-	transports: [
-		new transports.Console({ level: 'info' }),
-		new transports.File({ filename: 'RagiDB.log', level: 'debug'})
-		// level 設定 debug 代表 debug 以上的 level 的 log 通通都會顯示
-	]
-})
-
+const uid = 'RagiDB.server-6563349053925304016'
 
 /*
 *	存放資料的檔案
@@ -64,6 +37,135 @@ var readQueue = [] // read format = [ function , socket ]
 
 
 /*
+*	設定 Screen 設定 (Update Screen 在後面)
+*/
+
+
+// Create a screen object.
+var screen = blessed.screen({
+   smartCSR: true,
+   fullUnicode: true
+});
+
+screen.title = uid;
+
+// Create a box perfectly centered horizontally and vertically.
+var queueBox = blessed.box({
+	top: 'top',
+	left: 'left',
+	width: '100%',
+	height: '5%',
+	align: 'center',
+	valign: 'center',
+	content: '{bold}Queue{/bold}: null',
+	tags: true,
+	border: {
+		type: 'line'
+	}
+})
+
+var logBox = blessed.box({
+	top: '5%',
+	left: 'left',
+	width: '100%',
+	height: '95%',
+	content: 'Start RagiDB',
+	tags: true,
+	scrollable: true,
+	border: {
+		type: 'line'
+	}
+})
+
+screen.append(queueBox)
+screen.append(logBox)
+logBox.focus()
+
+// Quit on Escape, q, or Control-C.
+screen.key(['escape', 'q', 'C-c'], function(ch, key) {
+  return process.exit(0);
+});
+
+
+
+/*
+*	更新 Screen 設定
+*/
+
+var logBuffer = []
+const maxLogLength = 50
+var lastSaveDate = new Date()
+
+setInterval(function(){ 
+	
+	queueBox.setContent(`{bold}RagiDB{/bold} | {bold}Task{/bold}[${taskQueue.length}], {bold}Read{/bold}[${readQueue.length}], {bold}Last Save{/bold}: ${lastSaveDate}`); 
+	
+	logBox.content = ''
+
+	while(logBuffer.length > maxLogLength)
+		logBuffer.splice(0, 1)
+
+	for(let i = 0; i < logBuffer.length; ++i){
+		if(i == 0) logBox.setContent(logBuffer[0].message)
+		else logBox.setContent( logBox.content + '\n' + logBuffer[i].message )
+	}
+	
+	screen.render(); 
+
+}, 1000)
+
+
+
+/*
+*	設定 Logger 的格式
+*/
+
+const myFormat = printf(info => {
+	return `${info.timestamp} [${info.label}] ${info.level}: ${info.message}`
+})
+
+
+
+/*
+*	專案使用的三個 Level: 
+*		1. debug: 所有資訊 
+*		2. info : 只顯示必要資訊 (給 Console 介面看的)
+*		3. error: 重大錯誤 (亦會顯示在 Console)
+*/
+
+class YrCustomTransport extends Transport {
+	constructor(opts) { 
+		super(opts)
+	}
+
+	log(info, callback) {
+		setImmediate(() => {
+			this.emit('logged', info)
+		})
+
+		logBuffer.push(info)
+
+		callback()
+	}
+};
+
+const logger = createLogger({
+	format: combine(
+		label({ label: 'RagiDB' }),
+		timestamp(),
+		myFormat
+	),
+	transports: [
+		//new transports.Console({ level: 'info' }),
+		new transports.File({ filename: 'RagiDB.log', level: 'debug'}),
+		new YrCustomTransport({ level: 'info' })
+		// level 設定 debug 代表 debug 以上的 level 的 log 通通都會顯示
+	]
+})
+
+
+
+/*
 *	設定 IPC Server 的設定
 *
 *	config.id 為 連接此 Server 的 key， Client 那邊的字串必須與這邊相同
@@ -71,9 +173,9 @@ var readQueue = [] // read format = [ function , socket ]
 */
 
 // Setup ipc
-ipc.config.id = 'RagiDB.server-6563349053925304016';
-ipc.config.retry = 1500;
-ipc.config.silent = true;
+ipc.config.id = uid
+ipc.config.retry = 1500
+ipc.config.silent = true
 
 
 /*
@@ -111,7 +213,6 @@ ipc.serve(() => {
 
 ipc.server.start();
 
-
 /*
 *	設定 event 的設定
 *
@@ -146,6 +247,8 @@ event.on('RagiDB.DealAction.Task', () => {
 // 此 Event 只有在已經確認為 Dirty 後才會被發出
 event.on('RagiDB.DealAction.Save', () => {
 	
+	lastSaveDate = new Date()
+
 	logger.log({
 		level: 'info',
 		message: 'Confirm Dirty, Save'
@@ -161,11 +264,14 @@ event.on('RagiDB.DealAction.Read', () => {
 		message: 'Dealing Read Requests, ' + (dirty ? 'Using Cache' : "Remain Same")
 	})
 
-	// 如果記憶體與檔案內容不一致，請求存檔	
-	if(dirty)
+	// 如果記憶體與檔案內容不一致，請求存檔
+	/*if(dirty)
 	{
 		event.emit('RagiDB.DealAction.Save')
-	}
+	}*/
+	
+	// Maybe it is no so necessarily to save file so soon
+	// Try let dirty checker (line 202) to save
 
 	// action 本身不重要，只是為了資料格式統一
 	// socket 為連線對象，因為這是唯一需要像 client 傳送資料的地方
@@ -187,17 +293,17 @@ event.on('RagiDB.DealAction.Read', () => {
 setInterval(function(){
 	if(taskQueue.length > 0)
 		event.emit('RagiDB.DealAction.Task');
-}, 10)
+}, 100)
 
 setInterval(function(){
 	if(readQueue.length > 0)
 		event.emit('RagiDB.DealAction.Read');
-}, 10)
+}, 1000 * 0.5)
 
 setInterval(function(){
 	if(dirty)
 		event.emit('RagiDB.DealAction.Save');
-}, 50)
+}, 1000 * 10)
 
 
 // Implemented functions
@@ -324,12 +430,14 @@ function CheckExisted(containerId, data)
 function GetContainerId(containerType, nickname)
 {
 	let typeId = container.types.indexOf(containerType)
-	var idx = -1
-	for(idx in container.container){
+	var idx = 0
+
+	for(idx = 0; idx < container.container.length; ++idx){
 		if(container.container[idx].nickname == nickname && container.container[idx].typeId == typeId){
 			break
 		}
 	}
+	
 	return idx >= container.container.length ? -1 : idx
 }
 
@@ -353,7 +461,7 @@ function Add([containerType, nickname, data])
 	let containerId = GetContainerId(containerType, nickname)//container.types.indexOf(containerType)
 
 	// 類型不存在，新增類型
-	if(container.types[container.container[containerId].typeId] != containerType){
+	if(containerId == -1 || container.types[container.container[containerId].typeId] != containerType){
 		
 		logger.log({
 			level: 'info',

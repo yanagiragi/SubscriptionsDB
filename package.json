@@ -1,9 +1,10 @@
 {
   "name": "RagiDB",
   "version": "1.0.0",
-  "description": "",
+  "description": "Self Tool for RagiSubscription",
   "main": "main.js",
   "dependencies": {
+    "blessed": "^0.1.81",
     "node-ipc": "^9.1.1",
     "winston": "^3.0.0-rc5"
   },
@@ -13,5 +14,13 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yanagiragi/RagiDB.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yanagiragi/RagiDB/issues"
+  },
+  "homepage": "https://github.com/yanagiragi/RagiDB#readme"
 }

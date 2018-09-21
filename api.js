@@ -4,6 +4,7 @@ const md5 = require('crypto').createHash('md5')
 ipc.config.id = 'ragiDB.client' + md5.update(Date.now().toString())
 ipc.config.retry = 1500;
 ipc.config.silent = true;
+ipc.config.maxRetries = 10;
 
 exports.GetContainer = GetContainer
 exports.AddEntry = AddEntry
