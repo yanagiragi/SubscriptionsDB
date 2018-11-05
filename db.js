@@ -16,6 +16,25 @@ const uid = 'RagiDB.server-6563349053925304016'
 const dataPath = './data/container.json'
 var container = JSON.parse(fs.readFileSync(dataPath))
 
+function CreateHashId(typeId, nickname, entry)
+{
+	return `${container.types[typeId]}_${nickname}_${entry.href}_${entry.img}`
+}
+
+function CreateHashTable()
+{
+	let hash = []
+	container.container.map((e, index) => {
+		e.list.map((e2, index2) => {
+			let hashId = CreateHashId(e.typeId, e.nickname, e2)
+			hash.push(hashId)
+		})
+	})
+	console.log(`Mapping ${hash.length} hashes.`)
+	return hash
+}
+
+var hashTable = CreateHashTable()
 
 /*
 *	dirty 代表是否記憶體中的檔案有更改過，
@@ -24,96 +43,93 @@ var container = JSON.parse(fs.readFileSync(dataPath))
 
 var dirty = false
 
-
 /*
 *	taskQueue 紀錄接受到的工作，並依照工作類型分給不同函式完成它
 *
 *	readQueue 紀錄讀取的請求，一般來說會請求的主要就是瀏覽器端 (RagiSubscriptionWeb)
 *	因為沒有瀏覽器的資料呈現不需要太即時，因此沒有同步等當前 taskQueue 處理完才處理 readQ 請求
 */
-
+	
 var taskQueue = [] // task format = [ function , data ]
 var readQueue = [] // read format = [ function , socket ]
-
+	
+	
 
 /*
 *	設定 Screen 設定 (Update Screen 在後面)
 */
 
-
-// Create a screen object.
-var screen = blessed.screen({
-   smartCSR: true,
-   fullUnicode: true
-});
-
-screen.title = uid;
-
-// Create a box perfectly centered horizontally and vertically.
-var queueBox = blessed.box({
-	top: 'top',
-	left: 'left',
-	width: '100%',
-	height: '5%',
-	align: 'center',
-	valign: 'center',
-	content: '{bold}Queue{/bold}: null',
-	tags: true,
-	border: {
-		type: 'line'
-	}
-})
-
-var logBox = blessed.box({
-	top: '5%',
-	left: 'left',
-	width: '100%',
-	height: '95%',
-	content: 'Start RagiDB',
-	tags: true,
-	scrollable: true,
-	border: {
-		type: 'line'
-	}
-})
-
-screen.append(queueBox)
-screen.append(logBox)
-logBox.focus()
-
-// Quit on Escape, q, or Control-C.
-screen.key(['escape', 'q', 'C-c'], function(ch, key) {
-  return process.exit(0);
-});
-
-
-
-/*
-*	更新 Screen 設定
-*/
-
-var logBuffer = []
-const maxLogLength = 50
-var lastSaveDate = new Date()
-
-setInterval(function(){ 
+	// Create a screen object.
+	var screen = blessed.screen({
+	   smartCSR: true,
+	   fullUnicode: true
+	});
 	
-	queueBox.setContent(`{bold}RagiDB{/bold} | {bold}Task{/bold}[${taskQueue.length}], {bold}Read{/bold}[${readQueue.length}], {bold}Last Save{/bold}: ${lastSaveDate}`); 
+	screen.title = uid;
 	
-	logBox.content = ''
-
-	while(logBuffer.length > maxLogLength)
-		logBuffer.splice(0, 1)
-
-	for(let i = 0; i < logBuffer.length; ++i){
-		if(i == 0) logBox.setContent(logBuffer[0].message)
-		else logBox.setContent( logBox.content + '\n' + logBuffer[i].message )
-	}
+	// Create a box perfectly centered horizontally and vertically.
+	var queueBox = blessed.box({
+		top: 'top',
+		left: 'left',
+		width: '100%',
+		height: '5%',
+		align: 'center',
+		valign: 'center',
+		content: '{bold}Queue{/bold}: null',
+		tags: true,
+		border: {
+			type: 'line'
+		}
+	})
 	
-	screen.render(); 
+	var logBox = blessed.box({
+		top: '5%',
+		left: 'left',
+		width: '100%',
+		height: '95%',
+		content: 'Start RagiDB',
+		tags: true,
+		scrollable: true,
+		border: {
+			type: 'line'
+			}
+	})	
+	
+	screen.append(queueBox)
+	screen.append(logBox)
+	logBox.focus()
+	
+	// Quit on Escape, q, or Control-C.
+	screen.key(['escape', 'q', 'C-c'], function(ch, key) {
+		return process.exit(0);
+	});
+	
 
-}, 1000)
+	/*
+	*	更新 Screen 設定
+	*/
+		
+	var logBuffer = []
+	const maxLogLength = 50
+	var lastSaveDate = new Date()
 
+	setInterval(function(){ 
+	
+		queueBox.setContent(`{bold}RagiDB{/bold} | {bold}Task{/bold}[${taskQueue.length}], {bold}Read{/bold}[${readQueue.length}], {bold}Last Save{/bold}: ${lastSaveDate} | [${hashTable.length}]`); 
+			
+		logBox.content = ''
+
+		while(logBuffer.length > maxLogLength)
+			logBuffer.splice(0, 1)
+
+		for(let i = 0; i < logBuffer.length; ++i){
+			if(i == 0) logBox.setContent(logBuffer[0].message)
+			else logBox.setContent( logBox.content + '\n' + logBuffer[i].message )
+		}
+	
+		screen.render(); 
+	
+	}, 1000)
 
 
 /*
@@ -293,12 +309,12 @@ event.on('RagiDB.DealAction.Read', () => {
 setInterval(function(){
 	if(taskQueue.length > 0)
 		event.emit('RagiDB.DealAction.Task');
-}, 100)
+}, 10)
 
 setInterval(function(){
 	if(readQueue.length > 0)
 		event.emit('RagiDB.DealAction.Read');
-}, 1000 * 0.5)
+}, 100 * 0.5)
 
 setInterval(function(){
 	if(dirty)
@@ -386,24 +402,35 @@ function NoticeEntry([containerId, listId])
 
 function CheckExisted(containerId, data)
 {
+	let version = 2
+
 	var existed = false
+
+	if(version === 1){
 	
-	if(container.container[containerId] && container.container[containerId].list){
-		
-		for(var entryId in container.container[containerId].list){
+		if(container.container[containerId] && container.container[containerId].list){
 			
-			let entry = container.container[containerId].list[entryId]
-			let match = (
-				entry.title == data.title && 
-				entry.img == data.img &&
-				entry.href == data.href
-			)
+			for(var entryId in container.container[containerId].list){
+			
+				let entry = container.container[containerId].list[entryId]
+				let match = (
+					entry.title == data.title && 
+					entry.img == data.img &&
+					entry.href == data.href
+				)
 			
 			if(match){ // early break
 				existed = true
-				break
+					break
+				}
 			}
 		}
+	}
+	else if(version === 2){
+		let typeId = container.container[containerId].typeId
+		let nickname = container.container[containerId].nickname
+		let hashId = CreateHashId(typeId, nickname, data)
+		existed = hashTable.indexOf(hashId) !== -1
 	}
 
 	return existed
@@ -456,6 +483,15 @@ function GetContainerId(containerType, nickname)
 *	
 */
 
+function Validate(data)
+{
+	let isValid = false
+
+	isValid = data && data.title && data.href && data.img
+
+	return isValid
+}
+
 function Add([containerType, nickname, data])
 {
 	let containerId = GetContainerId(containerType, nickname)//container.types.indexOf(containerType)
@@ -487,9 +523,10 @@ function Add([containerType, nickname, data])
 		containerId = GetContainerId(containerType, nickname) 
 	}
 
-	var existed = CheckExisted(containerId, data)
+	let existed = CheckExisted(containerId, data)
+	let isValid = Validate(data)
 	
-	if(data && data.title && data.href && data.img && !existed)
+	if(isValid && !existed)
 	{
 		dirty = true;
 		
@@ -505,6 +542,11 @@ function Add([containerType, nickname, data])
 		data.id = (lastDataInContainer) ? parseInt(lastDataInContainer.id) + 1 : 0
 		
 		container.container[containerId].list.push(data)
+
+		let typeId = container.container[containerId].typeId
+		let nickname = container.container[containerId].nickname
+		let hashId = CreateHashId(typeId, nickname, data)
+		hashTable.Add(hashId)
 		
 		logger.log({
 			level: 'info',
@@ -535,3 +577,4 @@ function Add([containerType, nickname, data])
 		}
 	}
 }
+
