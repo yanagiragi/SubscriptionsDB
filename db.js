@@ -546,7 +546,7 @@ function Add([containerType, nickname, data])
 		let typeId = container.container[containerId].typeId
 		let nickname = container.container[containerId].nickname
 		let hashId = CreateHashId(typeId, nickname, data)
-		hashTable.Add(hashId)
+		hashTable.push(hashId)
 		
 		logger.log({
 			level: 'info',
