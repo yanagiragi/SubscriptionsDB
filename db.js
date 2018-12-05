@@ -355,6 +355,55 @@ function SaveDB()
 }
 
 
+
+/*
+*	Params: 
+*		containerId: container.container 中的 Id
+*	Return
+*		index: container.container 中的 Index
+*
+*	目的: 因為 Id 並非照順序排且可能會用跳的
+*	
+*	Examples:
+*
+*	60	
+*		typeId	22
+*		nickname	"鬼月あるちゅ SearchList"
+*		list	[…]
+*		id	60
+*	61	
+*		typeId	20
+*		nickname	"アルノサージュ SearchList"
+*		list	[…]
+*		id	62
+*
+*/
+function MapContainerIdToIndex(containerId)
+{
+	let isFound = false
+	let index = -1
+	
+	for(let i = 0; i < container.container.length; ++i)
+	{
+		if(container.container[i].id === parseInt(containerId)){
+			if(!isFound){
+				isFound = true
+				index = i
+			}
+			else{
+				logger.log({
+					level: 'error',
+					message: `Duplicated Id Found: <${containerId || null}>`
+				})
+				index = -1
+				break
+			}
+		}
+	}
+
+	return index
+}
+
 /*
 *	Params: 
 *		containerId: container.container 中的 Index
@@ -363,18 +412,20 @@ function SaveDB()
 */
 
 function NoticeEntry([containerId, listId])
-{
+{	
+	const realContainerId = MapContainerIdToIndex(containerId)
+
 	// 如果此 Entry 存在
-	if(container.container[containerId] && container.container[containerId].list[listId]){
+	if(realContainerId != -1 && container.container[realContainerId] && container.container[realContainerId].list[listId]){
 		
-		container.container[containerId].list[listId].isNoticed = true;
+		container.container[realContainerId].list[listId].isNoticed = true;
 		
 		dirty = true;
 		
 		logger.log({
 			console: 'true',
 			level: 'info',
-			message: `Read ContainerId<${containerId}> & ListId<${listId}>, title = ${container.container[containerId].list[listId].title}`
+			message: `Read ContainerId<${realContainerId}> & ListId<${listId}>, title = ${container.container[realContainerId].list[listId].title}`
 		});
 
 	}
@@ -382,7 +433,7 @@ function NoticeEntry([containerId, listId])
 
 		logger.log({
 			level: 'error',
-			message: `Error with ContainerId<${containerId}> & ListId<${listId}>`
+			message: `Error with ContainerId<${realContainerId}> & ListId<${listId}>`
 		});
 
 	}
@@ -453,6 +504,9 @@ function CheckExisted(containerId, data)
 *		它在 container.container 中的 Index (int)
 *
 */
+
+// Similar to MapContainerIdToIndex()
+// May Need ReFactor?
 
 function GetContainerId(containerType, nickname)
 {
