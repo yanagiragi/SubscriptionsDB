@@ -383,10 +383,6 @@ function MapContainerIdToIndex(containerId)
 	let isFound = false
 	let index = -1
 	
-	logger.log({
-		level: 'error',
-		message: `Duplicated Id Found: <${typeof containerId || null} ${typeof container.container[0].id }>`
-	})
 	for(let i = 0; i < container.container.length; ++i)
 	{
 		// use '==' instead of '===' to handle old id type is string, however new id type is integer
