@@ -8,6 +8,8 @@ const blessed = require('blessed')
 
 const uid = 'RagiDB.server-6563349053925304016'
 
+const useScreen = true
+
 /*
 *	存放資料的檔案
 *	path to container.json
@@ -59,6 +61,7 @@ var readQueue = [] // read format = [ function , socket ]
 *	設定 Screen 設定 (Update Screen 在後面)
 */
 
+	if(useScreen){
 	// Create a screen object.
 	var screen = blessed.screen({
 	   smartCSR: true,
@@ -94,15 +97,18 @@ var readQueue = [] // read format = [ function , socket ]
 			type: 'line'
 			}
 	})	
+
+
+		screen.append(queueBox)
+		screen.append(logBox)
+		logBox.focus()
 	
-	screen.append(queueBox)
-	screen.append(logBox)
-	logBox.focus()
+		// Quit on Escape, q, or Control-C.
+		screen.key(['escape', 'q', 'C-c'], function(ch, key) {
+			return process.exit(0);
+		});
+	}
 	
-	// Quit on Escape, q, or Control-C.
-	screen.key(['escape', 'q', 'C-c'], function(ch, key) {
-		return process.exit(0);
-	});
 	
 
 	/*
@@ -113,6 +119,7 @@ var readQueue = [] // read format = [ function , socket ]
 	const maxLogLength = 50
 	var lastSaveDate = new Date()
 
+	if(useScreen){
 	setInterval(function(){ 
 	
 		queueBox.setContent(`{bold}RagiDB{/bold} | {bold}Task{/bold}[${taskQueue.length}], {bold}Read{/bold}[${readQueue.length}], {bold}Last Save{/bold}: ${lastSaveDate} | [${hashTable.length}]`); 
@@ -127,11 +134,10 @@ var readQueue = [] // read format = [ function , socket ]
 			else logBox.setContent( logBox.content + '\n' + logBuffer[i].message )
 		}
 	
-		screen.render(); 
+			screen.render(); 
 	
 	}, 1000)
-
-
+	}
 /*
 *	設定 Logger 的格式
 */
@@ -172,7 +178,7 @@ const logger = createLogger({
 		myFormat
 	),
 	transports: [
-		//new transports.Console({ level: 'info' }),
+		new transports.Console({ level: 'info' }),
 		new transports.File({ filename: 'RagiDB.log', level: 'debug'}),
 		new YrCustomTransport({ level: 'info' })
 		// level 設定 debug 代表 debug 以上的 level 的 log 通通都會顯示
