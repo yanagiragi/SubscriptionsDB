@@ -8,7 +8,7 @@ const blessed = require('blessed')
 
 const uid = 'RagiDB.server-6563349053925304016'
 
-const useScreen = true
+const useScreen = false
 
 /*
 *	存放資料的檔案
@@ -120,23 +120,30 @@ var readQueue = [] // read format = [ function , socket ]
 	var lastSaveDate = new Date()
 
 	if(useScreen){
-	setInterval(function(){ 
+		setInterval(function(){ 
 	
-		queueBox.setContent(`{bold}RagiDB{/bold} | {bold}Task{/bold}[${taskQueue.length}], {bold}Read{/bold}[${readQueue.length}], {bold}Last Save{/bold}: ${lastSaveDate} | [${hashTable.length}]`); 
+			queueBox.setContent(`{bold}RagiDB{/bold} | {bold}Task{/bold}[${taskQueue.length}], {bold}Read{/bold}[${readQueue.length}], {bold}Last Save{/bold}: ${lastSaveDate} | [${hashTable.length}]`); 
 			
-		logBox.content = ''
+			logBox.content = ''
 
-		while(logBuffer.length > maxLogLength)
-			logBuffer.splice(0, 1)
+			while(logBuffer.length > maxLogLength)
+				logBuffer.splice(0, 1)
 
-		for(let i = 0; i < logBuffer.length; ++i){
-			if(i == 0) logBox.setContent(logBuffer[0].message)
-			else logBox.setContent( logBox.content + '\n' + logBuffer[i].message )
-		}
+			for(let i = 0; i < logBuffer.length; ++i){
+				if(i == 0) logBox.setContent(logBuffer[0].message)
+				else logBox.setContent( logBox.content + '\n' + logBuffer[i].message )
+			}
 	
-			screen.render(); 
+				screen.render(); 
 	
-	}, 1000)
+		}, 1000)
+	}
+	else
+	{
+		setInterval(function(){ 
+			if((taskQueue.length + readQueue.length) != 0)
+				console.log(`Task[${taskQueue.length}], Read[${readQueue.length}], Last Save: ${lastSaveDate}, Hash[${hashTable.length}]`)
+		}, 5000)
 	}
 /*
 *	設定 Logger 的格式
