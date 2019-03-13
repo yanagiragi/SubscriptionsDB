@@ -20,7 +20,7 @@ var container = JSON.parse(fs.readFileSync(dataPath))
 
 function CreateHashId(typeId, nickname, entry)
 {
-	return `${container.types[typeId]}_${nickname}_${entry.href}_${entry.img}`
+	return `${container.types[typeId]}_${nickname}_${entry.title}_${entry.href}_${entry.img}`
 }
 
 function CreateHashTable()
