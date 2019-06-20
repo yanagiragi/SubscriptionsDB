@@ -418,6 +418,33 @@ function MapContainerIdToIndex(containerId)
 	return index
 }
 
+function MapListIdToIndex(containerId, listId)
+{
+	let isFound = false
+	let index = -1
+	
+	for(let i = 0; i < container.container[containerId].list.length; ++i)
+	{
+		// use '==' instead of '===' to handle old id type is string, however new id type is integer
+		if(container.container[containerId].list[i].id == listId){
+			if(!isFound){
+				isFound = true
+				index = i
+			}
+			else{
+				logger.log({
+					level: 'error',
+					message: `Duplicated Id Found in ${containerId || null}: <${listId || null}>`
+				})
+				index = -1
+				break
+			}
+		}
+	}
+
+	return index
+}
+
 /*
 *	Params: 
 *		containerId: container.container 中的 Index
@@ -428,26 +455,30 @@ function MapContainerIdToIndex(containerId)
 function NoticeEntry([containerId, listId])
 {	
 	const realContainerId = MapContainerIdToIndex(containerId)
-
+	const realListId = MapListIdToIndex(realContainerId, listId)
+		logger.log({
+			console: 'true',
+			level: 'info',
+			message: `${realContainerId}, ${container.container[realContainerId].list.length}, ${realListId}`
+		});
 	// 如果此 Entry 存在
-	if(realContainerId != -1 && container.container[realContainerId] && container.container[realContainerId].list[listId]){
+	if(realContainerId != -1 && container.container[realContainerId] && container.container[realContainerId].list[realListId]){
 		
-		container.container[realContainerId].list[listId].isNoticed = true;
+		container.container[realContainerId].list[realListId].isNoticed = true;
 		
 		dirty = true;
 		
 		logger.log({
 			console: 'true',
 			level: 'info',
-			message: `Read ContainerId<${realContainerId}> & ListId<${listId}>, title = ${container.container[realContainerId].list[listId].title}`
+			message: `Read ContainerId<${realContainerId}> & ListId<${realListId}>, title = ${container.container[realContainerId].list[realListId].title}`
 		});
 
 	}
 	else{
-
 		logger.log({
 			level: 'error',
-			message: `Error with ContainerId<${realContainerId}> & ListId<${listId}>`
+			message: `Error with ContainerId<${containerId}> & ListId<${listId}>`
 		});
 
 	}
