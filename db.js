@@ -456,11 +456,6 @@ function NoticeEntry([containerId, listId])
 {	
 	const realContainerId = MapContainerIdToIndex(containerId)
 	const realListId = MapListIdToIndex(realContainerId, listId)
-		logger.log({
-			console: 'true',
-			level: 'info',
-			message: `${realContainerId}, ${container.container[realContainerId].list.length}, ${realListId}`
-		});
 	// 如果此 Entry 存在
 	if(realContainerId != -1 && container.container[realContainerId] && container.container[realContainerId].list[realListId]){
 		
