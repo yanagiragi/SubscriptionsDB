@@ -1,39 +1,39 @@
-const fetch = require('node-fetch')
+const fetch = require('node-fetch');
 
-const ip = 'http://127.0.0.1:3000'
+const ip = 'http://127.0.0.1:3000';
 
 async function AddEntry (args) {
-	const { containerType = -1, nickname = '', data = {} } = args
+	const { containerType = -1, nickname = '', data = {} } = args;
 	if (containerType === -1 || nickname === '' || data === {}) {
-		throw new Error(`Invalid AddEntry: ${JSON.stringify(args)}`)
+		throw new Error(`Invalid AddEntry: ${JSON.stringify(args)}`);
 	}
 	const response = await fetch(`${ip}/addEntry`, {
 		method: 'post',
 		body: JSON.stringify({ containerType, nickname, data }),
 		headers: { 'Content-Type': 'application/json' }
-	})
-	return response.text()
+	});
+	return response.text();
 }
 
 async function NoticeEntry (args) {
-	const { containerId = -1, listId = -1 } = args
+	const { containerId = -1, listId = -1 } = args;
 	if (containerId === -1 || listId === -1) {
-		throw new Error(`Invalid NoticeEntry: ${JSON.stringify(args)}`)
+		throw new Error(`Invalid NoticeEntry: ${JSON.stringify(args)}`);
 	}
-	const response = await fetch(`${ip}/notice/${containerId}/${listId}`)
-	return response.text()
+	const response = await fetch(`${ip}/notice/${containerId}/${listId}`);
+	return response.text();
 }
 
 async function NoticeEntryAll (args) {
-	const { containerId = -1 } = args
+	const { containerId = -1 } = args;
 	if (containerId === -1) {
-		throw new Error(`Invalid NoticeEntryAll: ${JSON.stringify(args)}`)
+		throw new Error(`Invalid NoticeEntryAll: ${JSON.stringify(args)}`);
 	}
-	const response = await fetch(`${ip}/noticeAll/${containerId}`)
-	return response.text()
+	const response = await fetch(`${ip}/noticeAll/${containerId}`);
+	return response.text();
 }
 
-module.exports = { AddEntry, NoticeEntry, NoticeEntryAll }
+module.exports = { AddEntry, NoticeEntry, NoticeEntryAll };
 
 // tests
 if (require.main === module) {
@@ -46,12 +46,12 @@ if (require.main === module) {
 				'href': '11',
 				'isNoticed': false
 			}
-		}
-		// outputs: 'result: OK', 
+		};
+		// outputs: 'result: OK',
 		// db logs 'error: Missing entry: <null, 11, 123, null>'
-		const result = await AddEntry(entry)
-		console.log('result: ', result)
-	}
+		const result = await AddEntry(entry);
+		console.log('result: ', result);
+	};
 
 	const test1 = async function () {
 		const entry = {
@@ -63,12 +63,12 @@ if (require.main === module) {
 				'href': '11',
 				'isNoticed': false
 			}
-		}
+		};
 		// outputs: 'result: OK'
 		// db logs 'Add New Entry, title = <test>'
-		const result = await AddEntry(entry)
-		console.log('result: ', result)
-	}
+		const result = await AddEntry(entry);
+		console.log('result: ', result);
+	};
 
 	const test2 = async function () {
 		const entry = {
@@ -80,14 +80,14 @@ if (require.main === module) {
 				'href': '11',
 				'isNoticed': false
 			}
-		}
-		// outputs: 'result: OK', 
+		};
+		// outputs: 'result: OK',
 		// db logs 'mapping Baidu MMD Teiba 2 to -1 Failed. Create new this.data.container' and 'Add New Entry, title = <test>'
-		const result = await AddEntry(entry)
-		console.log('result: ', result)
-	}
+		const result = await AddEntry(entry);
+		console.log('result: ', result);
+	};
 
-	test()
+	test();
 	// test1()
 	// test2()
 }

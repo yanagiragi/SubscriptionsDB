@@ -1,47 +1,51 @@
-const fs = require('fs')
-const path = require('path')
-const logger = require('./Logger')
+const fs = require('fs');
+const path = require('path');
+const logger = require('./Logger');
 
 class SubscriptionsDB {
 	constructor (filepath) {
-		this.dataPath = filepath
-		this.data = JSON.parse(fs.readFileSync(this.dataPath))
-		this.dirty = false
-		this.hashTable = this.CreateHashTable()
+		this.dataPath = filepath;
+		this.data = JSON.parse(fs.readFileSync(this.dataPath));
+		this.dirty = false;
+		this.hashTable = this.CreateHashTable();
 		this.saveInterval = setInterval(() => {
-			this.SaveDB()
-		}, 1000 * 5)
+			this.SaveDB();
+		}, 1000 * 5);
 	}
 
 	CreateHashId (typeId, nickname, entry) {
-		return `${this.data.types[typeId]}_${nickname}_${entry.title}_${entry.href}_${entry.img}`
+		return `${this.data.types[typeId]}_${nickname}_${entry.title}_${entry.href}_${entry.img}`;
 	}
 
 	CreateHashTable () {
-		const hash = []
+		const hash = [];
 		this.data.container.map((e, index) => {
 			e.list.map((e2, index2) => {
-				let hashId = this.CreateHashId(e.typeId, e.nickname, e2)
-				hash.push(hashId)
-			})
+				let hashId = this.CreateHashId(e.typeId, e.nickname, e2);
+				hash.push(hashId);
+			});
+		});
+		logger.log({
+			level: 'info',
+			message: `Mapped ${hash.length} Hashes.`
 		})
-		return hash
+		return hash;
 	}
 
 	SaveDB () {
 		if (this.dirty) {
 			try {
-				fs.writeFileSync(this.dataPath, JSON.stringify(this.data, null, 4))
+				fs.writeFileSync(this.dataPath, JSON.stringify(this.data, null, 4));
 				logger.log({
 					level: 'info',
 					message: 'Saving File Done, Restore Dirty to Clean'
-				})
-				this.dirty = false // Restore dirty flag
+				});
+				this.dirty = false; // Restore dirty flag
 			} catch (err) {
 				logger.log({
 					level: 'error',
 					message: `Error when writing file, error=<${err.message}>`
-				})
+				});
 			}
 		}
 	}
@@ -69,49 +73,49 @@ class SubscriptionsDB {
     *
     */
 	MapContainerIdToIndex (containerId) {
-		let index = -1
+		let index = -1;
 		for (let i = 0, isFound = false; i < this.data.container.length; ++i) {
 			// use '==' instead of '===' to handle old id type is string, however new id type is integer
 			// eslint-disable-next-line
 			if (this.data.container[i].id == containerId) {
 				if (!isFound) {
-					isFound = true
-					index = i
+					isFound = true;
+					index = i;
 				} else {
 					logger.log({
 						level: 'error',
 						message: `Duplicated Id Found: <${containerId || null}>`
-					})
-					index = -1
-					break
+					});
+					index = -1;
+					break;
 				}
 			}
 		}
 
-		return index
+		return index;
 	}
 
 	MapListIdToIndex (containerId, listId) {
-		let index = -1
+		let index = -1;
 		for (let i = 0, isFound = false; i < this.data.container[containerId].list.length; ++i) {
 			// use '==' instead of '===' to handle old id type is string, however new id type is integer
 			// eslint-disable-next-line
 			if (this.data.container[containerId].list[i].id == listId) {
 				if (!isFound) {
-					isFound = true
-					index = i
+					isFound = true;
+					index = i;
 				} else {
 					logger.log({
 						level: 'error',
 						message: `Duplicated Id Found in ${containerId || null}: <${listId || null}>`
-					})
-					index = -1
-					break
+					});
+					index = -1;
+					break;
 				}
 			}
 		}
 
-		return index
+		return index;
 	}
 
 	/*
@@ -121,46 +125,46 @@ class SubscriptionsDB {
     *
     */
 	NoticeEntry (containerId, listId) {
-		const realContainerId = this.MapContainerIdToIndex(containerId)
-		const realListId = this.MapListIdToIndex(realContainerId, listId)
-		const isEntryExists = realContainerId !== -1 && this.data.container[realContainerId] && this.data.container[realContainerId].list[realListId]
+		const realContainerId = this.MapContainerIdToIndex(containerId);
+		const realListId = this.MapListIdToIndex(realContainerId, listId);
+		const isEntryExists = realContainerId !== -1 && this.data.container[realContainerId] && this.data.container[realContainerId].list[realListId];
 		if (isEntryExists) {
-			this.data.container[realContainerId].list[realListId].isNoticed = true
-			this.dirty = true
+			this.data.container[realContainerId].list[realListId].isNoticed = true;
+			this.dirty = true;
 			logger.log({
 				console: 'true',
 				level: 'info',
 				message: `Read ContainerId<${realContainerId}> & ListId<${realListId}>, title = ${this.data.container[realContainerId].list[realListId].title}`
-			})
+			});
 		} else {
 			logger.log({
 				level: 'error',
 				message: `Error with ContainerId<${containerId}> & ListId<${listId}>`
-			})
+			});
 		}
 	}
 
 	NoticeEntryAll (containerId) {
-		const realContainerId = this.MapContainerIdToIndex(containerId)
-		const isContainerExists = realContainerId !== -1 && this.data.container[realContainerId]
+		const realContainerId = this.MapContainerIdToIndex(containerId);
+		const isContainerExists = realContainerId !== -1 && this.data.container[realContainerId];
 		if (isContainerExists) {
 			for (let i = 0; i < this.data.container[realContainerId].list.length; ++i) {
-				const current = this.data.container[realContainerId].list[i]
+				const current = this.data.container[realContainerId].list[i];
 				if (current.isNoticed === false) {
-					current.isNoticed = true
+					current.isNoticed = true;
 					logger.log({
 						console: 'true',
 						level: 'info',
 						message: `Read ContainerId<${realContainerId}> & ListId<${i}>, title = ${this.data.container[realContainerId].list[i].title}`
-					})
+					});
 				}
 			}
-			this.dirty = true
+			this.dirty = true;
 		} else {
 			logger.log({
 				level: 'error',
 				message: `Error with ContainerId<${containerId}>`
-			})
+			});
 		}
 	}
 
@@ -181,17 +185,17 @@ class SubscriptionsDB {
     *
     */
 	GetContainerId (containerType, nickname) {
-		const typeId = this.data.types.indexOf(containerType)
-		var idx = 0
+		const typeId = this.data.types.indexOf(containerType);
+		var idx = 0;
 
 		for (idx = 0; idx < this.data.container.length; ++idx) {
 			// eslint-disable-next-line
 			if (this.data.container[idx].nickname === nickname && this.data.container[idx].typeId == typeId) {
-				break
+				break;
 			}
 		}
 
-		return idx >= this.data.container.length ? -1 : idx
+		return idx >= this.data.container.length ? -1 : idx;
 	}
 
 	/*
@@ -205,61 +209,61 @@ class SubscriptionsDB {
     *
     */
 	CheckExisted (containerId, data) {
-		let typeId = this.data.container[containerId].typeId
-		let nickname = this.data.container[containerId].nickname
-		let hashId = this.CreateHashId(typeId, nickname, data)
-		return this.hashTable.indexOf(hashId) !== -1
+		let typeId = this.data.container[containerId].typeId;
+		let nickname = this.data.container[containerId].nickname;
+		let hashId = this.CreateHashId(typeId, nickname, data);
+		return this.hashTable.indexOf(hashId) !== -1;
 	}
 
 	CheckContainerId (containerId, containerType, nickname) {
-		const isContainerIdNotExists = containerId === -1 || this.data.types[this.data.container[containerId].typeId] !== containerType
+		const isContainerIdNotExists = containerId === -1 || this.data.types[this.data.container[containerId].typeId] !== containerType;
 		if (isContainerIdNotExists) {
 			// type does not exists, create new type
 			logger.log({
 				level: 'info',
 				message: `mapping ${containerType} ${nickname} to ${containerId} Failed. Create new this.data.container`
-			})
+			});
 
 			let matchedTypeId = 0;
 			for (matchedTypeId = 0; matchedTypeId < this.data.types.length; ++matchedTypeId) {
 				if (this.data.types[matchedTypeId] === containerType) {
-					break
+					break;
 				}
 			}
 
 			if (matchedTypeId >= this.data.types.length) {
-				this.data.types.push(containerType)
+				this.data.types.push(containerType);
 			}
 
-			const newId = parseInt(this.data.container[this.data.container.length - 1].id) + 1
+			const newId = parseInt(this.data.container[this.data.container.length - 1].id) + 1;
 			this.data.container.push({
 				'typeId': matchedTypeId,
 				'nickname': nickname,
 				'list': [],
 				'id': newId
-			})
+			});
 
-			return this.GetContainerId(containerType, nickname)
+			return this.GetContainerId(containerType, nickname);
 		}
 
-		return containerId
+		return containerId;
 	}
 
 	AddEntry (args) {
-		const { containerType = -1, nickname = '', data = {} } = args
+		const { containerType = -1, nickname = '', data = {} } = args;
 		if (containerType === -1 || nickname === '' || data === {}) {
 			logger.log({
 				level: 'error',
 				message: `Invalid Entry, entry = ${JSON.stringify(args)}`
-			})
-			return 'Invalid Entry'
+			});
+			return 'Invalid Entry';
 		}
-		const containerId = this.CheckContainerId(this.GetContainerId(containerType, nickname), containerType, nickname)
-		const existed = this.CheckExisted(containerId, data)
-		const isValid = data && data.title && data.href && data.img
+		const containerId = this.CheckContainerId(this.GetContainerId(containerType, nickname), containerType, nickname);
+		const existed = this.CheckExisted(containerId, data);
+		const isValid = data && data.title && data.href && data.img;
 
 		if (isValid && !existed) {
-			this.dirty = true
+			this.dirty = true;
 
 			/*	取得要新增的 Entry 的 Id 應該是多少
             *
@@ -267,52 +271,52 @@ class SubscriptionsDB {
             *
             *	(即使手動刪出中間幾個 entry，id 還是會繼續 increment 下去，不會蓋到之前的資料)
             */
-			const lastDataInContainer = this.data.container[containerId].list[this.data.container[containerId].list.length - 1]
+			const lastDataInContainer = this.data.container[containerId].list[this.data.container[containerId].list.length - 1];
 
 			// 如果剛剛才建立這類型，設定data.id = 0
-			data.id = (lastDataInContainer) ? parseInt(lastDataInContainer.id) + 1 : 0
+			data.id = (lastDataInContainer) ? parseInt(lastDataInContainer.id) + 1 : 0;
 
-			this.data.container[containerId].list.push(data)
+			this.data.container[containerId].list.push(data);
 
-			let typeId = this.data.container[containerId].typeId
-			let nickname = this.data.container[containerId].nickname
-			let hashId = this.CreateHashId(typeId, nickname, data)
-			this.hashTable.push(hashId)
+			let typeId = this.data.container[containerId].typeId;
+			let nickname = this.data.container[containerId].nickname;
+			let hashId = this.CreateHashId(typeId, nickname, data);
+			this.hashTable.push(hashId);
 
 			logger.log({
 				level: 'info',
 				message: `Add New Entry, title = <${data.title}>`
-			})
+			});
 		} else {
 			if (existed) {
 				logger.log({
 					level: 'debug',
 					message: `Entry existed, title = <${data.title}>`
-				})
+				});
 			} else {
 				if (data) {
 					logger.log({
 						level: 'error',
 						message: `Missing entry: <${data.title || null}, ${data.href || null}, ${data.img || null}, ${data.isNoticed || null}>`
-					})
+					});
 				} else {
 					logger.log({
 						level: 'error',
 						message: `Missing entry: <${data || null}>`
-					})
+					});
 				}
 			}
 		}
 	}
 
 	GetContainerTypes () {
-		return Object.assign({}, this.data.types)
+		return Object.assign({}, this.data.types);
 	}
 
 	GetContainer () {
-		return Object.assign({}, this.data.container)
+		return Object.assign({}, this.data.container);
 	}
 }
 
-const filepath = path.join(__dirname, '../data/container.json')
-module.exports = new SubscriptionsDB(filepath)
+const filepath = path.join(__dirname, '../data/container.json');
+module.exports = new SubscriptionsDB(filepath);

@@ -10,6 +10,7 @@ module.exports = {
 	"rules": {
 		"indent": ["error", "tab", {"SwitchCase": 1}],
 		"no-tabs": 0,
+		"semi": ["error", "always"],
 		"quotes": ["error", "single"],
 		"no-unused-vars": "off"
 	}
