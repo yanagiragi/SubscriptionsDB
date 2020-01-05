@@ -1,33 +1,39 @@
-const express = require('express');
-const router = express.Router();
+const express = require('express')
+const DB = require('../core/db')
+const router = express.Router()
 
-router.get('/', function(req, res, next) {
-  res.send('Yello. This is SubscriptionDB entry point.')
-});
+router.get('/', function (req, res, next) {
+	res.send('Yello. This is SubscriptionDB entry point.')
+})
 
-// api for notification
-router.get('/containerType', function(req, res, next) {
-  res.send('Yello.')
-});
+// api for notification, no use fow now
+router.get('/container', function (req, res, next) {
+	const container = DB.GetContainer()
+	res.send(JSON.stringify(container))
+})
 
-router.get('/notice/:containerId/:entryId', function(req, res, next) {
-  const containerId = req.params.containerId
-  const entryId = req.params.entryId
-  console.log(containerId)
-  console.log(entryId)
-  res.send('respond with a resource' + containerId + ' ' + entryId);
-});
+// api for notification, no use for now
+router.get('/containerType', function (req, res, next) {
+	const types = DB.GetContainerTypes()
+	res.send(JSON.stringify(types))
+})
 
-router.get('/noticeAll/:containerId', function(req, res, next) {
-  const containerId = req.params.containerId
-  console.log(containerId)
-  console.log(entryId)
-  res.send('respond with a resource' + containerId + ' ' + entryId);
-});
+router.get('/notice/:containerId/:entryId', function (req, res, next) {
+	const containerId = req.params.containerId
+	const entryId = req.params.entryId
+	DB.NoticeEntry(containerId, entryId)
+	res.send('OK')
+})
 
-router.post('/addEntry', function(req, res, next) {
-  console.log(req.body)
-  res.send('respond with a resource' + JSON.stringify(req.body));
-});
+router.get('/noticeAll/:containerId', function (req, res, next) {
+	const containerId = req.params.containerId
+	DB.NoticeEntryAll(containerId)
+	res.send('OK')
+})
 
-module.exports = router;
+router.post('/addEntry', function (req, res, next) {
+	DB.AddEntry(req.body)
+	res.send('OK')
+})
+
+module.exports = router
