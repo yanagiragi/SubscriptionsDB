@@ -1,6 +1,5 @@
 const fs = require('fs');
-const path = require('path');
-const logger = require('./Logger');
+const Logger = require('./Logger');
 
 class SubscriptionsDB {
 	constructor (filepath) {
@@ -25,7 +24,7 @@ class SubscriptionsDB {
 				hash.push(hashId);
 			});
 		});
-		logger.log({
+		Logger.log({
 			level: 'info',
 			message: `Mapped ${hash.length} Hashes.`
 		})
@@ -36,13 +35,13 @@ class SubscriptionsDB {
 		if (this.dirty) {
 			try {
 				fs.writeFileSync(this.dataPath, JSON.stringify(this.data, null, 4));
-				logger.log({
+				Logger.log({
 					level: 'info',
 					message: 'Saving File Done, Restore Dirty to Clean'
 				});
 				this.dirty = false; // Restore dirty flag
 			} catch (err) {
-				logger.log({
+				Logger.log({
 					level: 'error',
 					message: `Error when writing file, error=<${err.message}>`
 				});
@@ -82,7 +81,7 @@ class SubscriptionsDB {
 					isFound = true;
 					index = i;
 				} else {
-					logger.log({
+					Logger.log({
 						level: 'error',
 						message: `Duplicated Id Found: <${containerId || null}>`
 					});
@@ -105,7 +104,7 @@ class SubscriptionsDB {
 					isFound = true;
 					index = i;
 				} else {
-					logger.log({
+					Logger.log({
 						level: 'error',
 						message: `Duplicated Id Found in ${containerId || null}: <${listId || null}>`
 					});
@@ -131,13 +130,13 @@ class SubscriptionsDB {
 		if (isEntryExists) {
 			this.data.container[realContainerId].list[realListId].isNoticed = true;
 			this.dirty = true;
-			logger.log({
+			Logger.log({
 				console: 'true',
 				level: 'info',
 				message: `Read ContainerId<${realContainerId}> & ListId<${realListId}>, title = ${this.data.container[realContainerId].list[realListId].title}`
 			});
 		} else {
-			logger.log({
+			Logger.log({
 				level: 'error',
 				message: `Error with ContainerId<${containerId}> & ListId<${listId}>`
 			});
@@ -152,7 +151,7 @@ class SubscriptionsDB {
 				const current = this.data.container[realContainerId].list[i];
 				if (current.isNoticed === false) {
 					current.isNoticed = true;
-					logger.log({
+					Logger.log({
 						console: 'true',
 						level: 'info',
 						message: `Read ContainerId<${realContainerId}> & ListId<${i}>, title = ${this.data.container[realContainerId].list[i].title}`
@@ -161,7 +160,7 @@ class SubscriptionsDB {
 			}
 			this.dirty = true;
 		} else {
-			logger.log({
+			Logger.log({
 				level: 'error',
 				message: `Error with ContainerId<${containerId}>`
 			});
@@ -219,7 +218,7 @@ class SubscriptionsDB {
 		const isContainerIdNotExists = containerId === -1 || this.data.types[this.data.container[containerId].typeId] !== containerType;
 		if (isContainerIdNotExists) {
 			// type does not exists, create new type
-			logger.log({
+			Logger.log({
 				level: 'info',
 				message: `mapping ${containerType} ${nickname} to ${containerId} Failed. Create new this.data.container`
 			});
@@ -252,7 +251,7 @@ class SubscriptionsDB {
 	AddEntry (args) {
 		const { containerType = -1, nickname = '', data = {} } = args;
 		if (containerType === -1 || nickname === '' || data === {}) {
-			logger.log({
+			Logger.log({
 				level: 'error',
 				message: `Invalid Entry, entry = ${JSON.stringify(args)}`
 			});
@@ -283,24 +282,24 @@ class SubscriptionsDB {
 			let hashId = this.CreateHashId(typeId, nickname, data);
 			this.hashTable.push(hashId);
 
-			logger.log({
+			Logger.log({
 				level: 'info',
 				message: `Add New Entry, title = <${data.title}>`
 			});
 		} else {
 			if (existed) {
-				logger.log({
+				Logger.log({
 					level: 'debug',
 					message: `Entry existed, title = <${data.title}>`
 				});
 			} else {
 				if (data) {
-					logger.log({
+					Logger.log({
 						level: 'error',
 						message: `Missing entry: <${data.title || null}, ${data.href || null}, ${data.img || null}, ${data.isNoticed || null}>`
 					});
 				} else {
-					logger.log({
+					Logger.log({
 						level: 'error',
 						message: `Missing entry: <${data || null}>`
 					});

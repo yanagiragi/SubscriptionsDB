@@ -26,4 +26,4 @@ logger.stream = {
 	}
 }
 
-module.exports = logger;
+module.exports = logger

@@ -28,12 +28,18 @@ class SubscriptionsDbApi {
 	}
 
 	async NoticeEntryAll (args) {
-		const { containerId = -1 } = args;
+		const { containerId = -1, listIds = [] } = args;
 		if (containerId === -1) {
 			throw new Error(`Invalid NoticeEntryAll: ${JSON.stringify(args)}`);
 		}
-		const response = await fetch(`${this.ip}/noticeAll/${containerId}`);
-		return response.text();
+
+		let responses = []
+		for (const listId of listIds) {
+			const args = { containerId, listId }
+			responses.push(await this.NoticeEntry(args))
+		}
+		
+		return responses.join(',')
 	}
 }
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const createError = require('http-errors');
 const bodyParser = require('body-parser');
-const { Logger } = require('..');
+const Logger = require('../core/Logger');
 const morgan = require('morgan')('combined', { 'stream': Logger.stream });
 
 // Route rules
