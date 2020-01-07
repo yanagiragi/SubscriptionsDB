@@ -1,5 +1,4 @@
 const { createLogger, format, transports } = require('winston')
-// sconst Transport = require('winston-transport')
 const { combine, timestamp, label, printf } = format
 
 const formatter = printf(info => {
