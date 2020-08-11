@@ -234,7 +234,11 @@ class SubscriptionsDB {
 				this.data.types.push(containerType);
 			}
 
-			const newId = parseInt(this.data.container[this.data.container.length - 1].id) + 1;
+			let newId = 0;
+			if (this.data.container.length > 0) {
+				newId = parseInt(this.data.container[this.data.container.length - 1].id) + 1;
+			}
+
 			this.data.container.push({
 				'typeId': matchedTypeId,
 				'nickname': nickname,
