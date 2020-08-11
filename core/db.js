@@ -319,6 +319,10 @@ class SubscriptionsDB {
 	GetContainer () {
 		return Object.assign({}, this.data.container);
 	}
+
+	GetData() {
+		return Object.assign({}, this.data);
+	}
 }
 
 module.exports = SubscriptionsDB;
