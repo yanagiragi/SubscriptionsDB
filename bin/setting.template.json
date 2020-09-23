@@ -1,0 +1,9 @@
+{
+	"clientSetting": {
+		"user": "DB_USER",
+		"host": "DB_HOST",
+		"password": "DB_PASSWORD",
+		"port": 5432
+	},
+	"table": "DB_TABLE"
+}
