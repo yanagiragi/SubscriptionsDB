@@ -3,24 +3,63 @@ const Logger = require('./Logger');
 
 class SubscriptionsDB {
 	constructor (setting) {
+		this.table = setting.table,
+		this.noticedTable = setting.noticedTable,
+		
+		// setup client
 		this.client = new Client(setting.clientSetting)
-		this.table = setting.table,			
 		this.client.connect()
+		
 		this.cache = []
 		this.unNoticedCache = []
+		this.noticedCache = []
 		this.nicknameCache = []
-		this.isDirty = true
-
-		this.queue = []
-
-		this.InitCache(this)
 		
-		setInterval(this.InitCache.bind(this), 1000 * 30);
+		this.isDirty = true
+		this.isNoticedCacheDirty = true
+		this.noticedEntryMaximumAllowance = 10
 
-		setInterval(this.DealQuery.bind(this), 1000 * 0.5);
+		this.lastUpdateTime = Date.now()
+		this.cacheLiveTime = 1000 * 30
+		
+		this.queue = []
+		this.addEntryQueue = []
+
+		this.UpdateCache()
+
+		//setInterval(this.UpdateCache.bind(this), 1000 * 30);
+
+		setInterval(this.DealQuery.bind(this), 1000 * 0.1);
+		setInterval(this.DealAddEntry.bind(this), 5);
+
+		setInterval(
+			() => {
+				if ((this.queue.length + this.addEntryQueue.length) == 0) return ;
+				Logger.log({ level: 'info', message: `Queue = ${this.queue.length}, AddEntryQueue = ${this.addEntryQueue.length}` })
+			}, 1000 * 5)
 	}
 
-	async InitCache()
+	async MoveNoticedEntryToNoticedTable()
+	{
+		const query = {
+			text: `WITH moved AS ( DELETE FROM ${this.table} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.noticedTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
+			values: [],
+		}
+		
+		const func = (option) =>
+		{
+			return new Promise((resolve, reject) =>
+			{	
+				this.client.query(option, (err, res) => resolve(res))
+			});
+		}
+		
+		const result = await func(query)
+		
+		return result
+	}
+	
+	async UpdateCache()
 	{
 		this.isDirty = true
 
@@ -33,12 +72,25 @@ class SubscriptionsDB {
 				this.client.query(option, (err, res) => resolve(res))
 			});
 		}
-
+		
 		let query = {
+			text: ``,
+			values: [],
+		}
+		let result = null
+		
+		let difference = this.cache.length - this.unNoticedCache.length
+		if (difference >= this.noticedEntryMaximumAllowance) {
+			Logger.log({ level: 'info', message: `Detect noticed entry count ${difference} exceeds noticed_Entry_Maximum_Allowance, start moving noticed entry to noticedTable.` })
+			this.isNoticedCacheDirty =  true
+			await this.MoveNoticedEntryToNoticedTable()
+		}
+		
+		query = {
 			text: `SELECT * FROM ${this.table};`,
 			values: [],
 		}
-		let result = await func(query);
+		result = await func(query);
 		this.cache = result.rows
 		
 		query = {
@@ -48,25 +100,37 @@ class SubscriptionsDB {
 		result = await func(query);
 		this.unNoticedCache = result.rows
 		
-		query = {
-			text: `SELECT DISTINCT type FROM ${this.table};`,
-			values: [],
-		}
-		result = await func(query);
-		this.nicknameCache = result.rows.map(x => x.type)
+		this.nicknameCache = [...new Set(this.cache.map(x => x.type).concat(this.noticedCache.map(x => x.type)))]
 
-		Logger.log({ level: 'info', message: 'Read DB Done' })
-		
+		if (this.noticedCache == null || this.isNoticedCacheDirty) {
+			query = {
+				text: `SELECT * FROM ${this.noticedTable};`,
+				values: [],
+			}
+			result = await func(query);
+			this.noticedCache = result.rows
+			this.isNoticedCacheDirty = false
+		}
+
+		Logger.log({ level: 'info', message: `Read DB Done. Status: (cache: ${this.cache.length}, noticed: ${this.noticedCache.length}), unNoticed: ${this.unNoticedCache.length}, nickname: ${this.nicknameCache.length}` })
+
 		this.isDirty = false
+		this.isNoticedCacheDirty = false
 	}
 
 	DealQuery()
 	{
-
 		if (this.isDirty) return; 
 		if (this.queue.length == 0) return;
 
-		const task = this.queue.pop();
+		const now = Date.now()
+		const diff = now - this.lastUpdateTime
+		if (diff > this.cacheLifeTime) {
+			this.lastUpdateTime = now
+			this.UpdateCache()
+		}
+
+		const { task, callback } = this.queue.pop();
 		this.client.query(task, (err, res) => {
 			if (err) {
 				this.queue.push(task)
@@ -83,7 +147,7 @@ class SubscriptionsDB {
 				{
 					Logger.log({
 						level: 'info',
-						message: `[${this.queue.length}] Read Entry, title = <${task.values}>`
+						message: `[${this.queue.length}] Read Entry, id = <${task.values}>`
 					});
 				}
 				else {
@@ -92,13 +156,17 @@ class SubscriptionsDB {
 						message: `Query: [${this.queue.length}]: ${JSON.stringify(task)}`
 					});
 				}
+
+				callback(res)
 			}
 		})
 	}
 
-	Query(option, prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;", postfix = "COMMIT;")
+	async Query(option, prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;", postfix = "COMMIT;")
 	{
-		this.queue.push(option)
+		return new Promise((resolve, reject) => {
+			this.queue.push({ 'task': option, 'callback': resolve })
+		})
 	}
 
 	/*
@@ -112,7 +180,6 @@ class SubscriptionsDB {
 			text: `UPDATE ${this.table} SET ISNOTICED = true where id = $1;`,
 			values: [ id ],
 		})
-		
 		const isEntryExists = result.rowCount && result.rowCount > 0;
 		if (isEntryExists) {
 			const isEntryExistsInCache = this.cache.filter(x => x.id == id).length > 0
@@ -142,6 +209,18 @@ class SubscriptionsDB {
 	}
 
 	async AddEntry (args) {
+		this.addEntryQueue.push(args)
+	}
+
+	async DealAddEntry () {
+		
+		if (this.isDirty) { /*console.log('Detect Dirty When Try Deal AddEntry(), waiting...');*/ return; } 
+		if (this.addEntryQueue.length == 0) return;
+
+		//console.log('Deal AddEntry(), length = ' + this.addEntryQueue.length);
+
+		const args = this.addEntryQueue.pop();
+		
 		const { containerType = '', nickname = '', data = {} } = args;
 		if (containerType === '' || nickname === '' || data === {}) {
 			Logger.log({
@@ -151,11 +230,21 @@ class SubscriptionsDB {
 			return 'Invalid Entry';
 		}
 
+
+		// this.cache may not be ready
+
 		let existed = this.cache.filter(x => 
-			x.title == data.title &&
-			x.nickname == nickname &&
-			x.href == data.href &&
-			x.img == data.img
+				x.title == data.title &&
+				x.nickname == nickname &&
+				x.href == data.href &&
+				x.img == data.img
+			).length > 0
+			||
+			this.noticedCache.filter(x => 
+				x.title == data.title &&
+				x.nickname == nickname &&
+				x.href == data.href &&
+				x.img == data.img
 			).length > 0;
 		/*if (existed == false) {
 			const result = await this.Query({
@@ -177,13 +266,30 @@ class SubscriptionsDB {
 		}*/
 
 		const isValid = data && data.title && data.href && data.img;
+		//console.log(isValid, existed, data)
 
-		if (isValid && !existed) {			
+		if (isValid != null && !existed) {
 			/*await this.Query({
 				text: `INSERT INTO ${this.table} (title, href, img, isNoticed, type, nickname) VALUES ($1, $2, $3, $4, $5, $6);`,
 				values: [ data.title, data.href, data.img, false, containerType, nickname ],
 			})*/
-			await this.Query({
+			
+			const a = this.cache.filter(x => 
+				x.title == data.title &&
+				x.nickname == nickname &&
+				x.href == data.href &&
+				x.img == data.img
+			)
+			const b = this.noticedCache.filter(x => 
+				x.title == data.title &&
+				x.nickname == nickname &&
+				x.href == data.href &&
+				x.img == data.img
+			)
+
+			console.log(data, isValid, existed, a, b)
+
+			this.Query({
 				text: `INSERT INTO ${this.table} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.table} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 );`,
 				values: [ data.title, data.href, data.img, false, containerType, nickname, data.title, data.href, data.img, containerType, nickname ],
 			})

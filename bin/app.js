@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression');
 const createError = require('http-errors');
 const bodyParser = require('body-parser');
 const Logger = require('../core/Logger');
@@ -12,6 +13,7 @@ const ipWhitelist = [
 	'::ffff:0.0.0.0' // modified your white list
 ]
 
+app.use(compression())
 app.use(morgan);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
