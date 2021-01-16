@@ -1,5 +1,15 @@
-const { createLogger, format, transports } = require('winston')
+const { createLogger, format, transports } = require('winston'); 
+const winstonDailyRotateFile = require('winston-daily-rotate-file');
 const { combine, timestamp, label, printf } = format
+
+const rotatedTransport = new (transports.DailyRotateFile)({
+	filename: 'subscriptionsDB-%DATE%.log',
+	level: 'debug',
+	datePattern: 'YYYY-MM',
+	zippedArchive: true,
+	maxSize: '1g',
+	maxFiles: '14d'
+});
 
 const formatter = printf(info => {
 	return `${info.timestamp} [${info.label}] ${info.level}: ${info.message}`
@@ -13,7 +23,8 @@ const logger = createLogger({
 	),
 	transports: [
 		new transports.Console({ level: 'info' }),
-		new transports.File({ filename: 'db.log', level: 'debug'}),
+		//new transports.File({ filename: 'db.log', level: 'debug'}),
+		rotatedTransport
 	],
 })
 

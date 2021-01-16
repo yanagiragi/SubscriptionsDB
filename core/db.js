@@ -100,7 +100,8 @@ class SubscriptionsDB {
 		result = await func(query);
 		this.unNoticedCache = result.rows
 		
-		this.nicknameCache = [...new Set(this.cache.map(x => x.type).concat(this.noticedCache.map(x => x.type)))]
+		const nicknames = [...this.cache, ...this.noticedCache].map(x => x.type)
+		this.nicknameCache = [...new Set(nicknames)]
 
 		if (this.noticedCache == null || this.isNoticedCacheDirty) {
 			query = {
@@ -287,7 +288,7 @@ class SubscriptionsDB {
 				x.img == data.img
 			)
 
-			console.log(data, isValid, existed, a, b)
+			// console.log(data, isValid, existed, a, b)
 
 			this.Query({
 				text: `INSERT INTO ${this.table} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.table} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 );`,
@@ -348,7 +349,7 @@ class SubscriptionsDB {
 	}
 
 	async GetContainerTypes () {
-		Logger.log({ level: 'info', message: 'Get Nickname, Return cache' });
+		Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.nicknameCache) });
 		return this.nicknameCache;
 	}
 
