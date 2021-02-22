@@ -1,4 +1,5 @@
 const express = require('express');
+const compression = require('compression');
 const createError = require('http-errors');
 const bodyParser = require('body-parser');
 const Logger = require('../core/Logger');
@@ -6,16 +7,28 @@ const morgan = require('morgan')('combined', { 'stream': Logger.stream });
 
 // Route rules
 const indexRouter = require('./routes');
-
 const app = express();
 
+const ipWhitelist = [
+	'::ffff:127.0.0.1' // modified your white list
+]
+
+app.use(compression())
 app.use(morgan);
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-app.use('/', indexRouter);
+app.use('/', function(req, res, next) {
+	const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress
+	if (ipWhitelist.includes(ip)) {
+		indexRouter(req, res, next)
+	}
+	else {
+		next(createError(404))
+	}
+});
 
 // catch 404 and forward to error handler
 app.use(function (req, res, next) {
@@ -33,6 +46,6 @@ app.use(function (err, req, res, next) {
 	res.send('error');
 });
 
-app.listen(process.env.PORT || 3010);
+app.listen(process.env.PORT || 7070);
 
 module.exports = app;

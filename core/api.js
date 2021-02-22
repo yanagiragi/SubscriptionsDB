@@ -6,8 +6,8 @@ class SubscriptionsDbApi {
 	}
 
 	async AddEntry (args) {
-		const { containerType = -1, nickname = '', data = {} } = args;
-		if (containerType === -1 || nickname === '' || data === {}) {
+		const { containerType = '', nickname = '', data = {} } = args;
+		if (containerType === '' || nickname === '' || data === {}) {
 			throw new Error(`Invalid AddEntry: ${JSON.stringify(args)}`);
 		}
 		const response = await fetch(`${this.ip}/addEntry`, {
@@ -19,27 +19,31 @@ class SubscriptionsDbApi {
 	}
 
 	async NoticeEntry (args) {
-		const { containerId = -1, listId = -1 } = args;
-		if (containerId === -1 || listId === -1) {
+		const { id = -1 } = args;
+		if (id === -1) {
 			throw new Error(`Invalid NoticeEntry: ${JSON.stringify(args)}`);
 		}
-		const response = await fetch(`${this.ip}/notice/${containerId}/${listId}`);
+		const response = await fetch(`${this.ip}/notice/${id}`);
 		return response.text();
 	}
 
 	async NoticeEntryAll (args) {
-		const { containerId = -1, listIds = [] } = args;
-		if (containerId === -1) {
-			throw new Error(`Invalid NoticeEntryAll: ${JSON.stringify(args)}`);
-		}
-
+		const { listIds = [] } = args;
 		let responses = []
 		for (const listId of listIds) {
-			const args = { containerId, listId }
-			responses.push(await this.NoticeEntry(args))
-		}
-		
+			responses.push(await this.NoticeEntry({ id: listId }))
+		}		
 		return responses.join(',')
+	}
+
+	async GetContainers () {
+		const response = await fetch(`${this.ip}/containerAll`);
+		return response.text();
+	}
+
+	async GetUnNoticedContainers (args) {
+		const response = await fetch(`${this.ip}/container`);
+		return response.text();
 	}
 }
 
@@ -52,7 +56,7 @@ if (require.main === module) {
 
 	const test = async function () {
 		const entry = {
-			containerType: 'Baidu',
+			type: 'Baidu',
 			nickname: 'MMD Teiba',
 			data: {
 				'img': '123',
@@ -68,7 +72,7 @@ if (require.main === module) {
 
 	const test1 = async function () {
 		const entry = {
-			containerType: 'Baidu',
+			type: 'Baidu',
 			nickname: 'MMD Teiba',
 			data: {
 				'title': 'test',
@@ -85,7 +89,7 @@ if (require.main === module) {
 
 	const test2 = async function () {
 		const entry = {
-			containerType: 'Baidu',
+			type: 'Baidu',
 			nickname: 'MMD Teiba 2',
 			data: {
 				'title': 'test',

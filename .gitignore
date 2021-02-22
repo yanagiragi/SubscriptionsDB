@@ -59,3 +59,9 @@ typings/
 .env
 
 data/container.json
+
+bin/setting.json
+
+# winston rotate generated files
+bin/*-audit.json
+bin/*.log*

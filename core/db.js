@@ -1,295 +1,278 @@
-const fs = require('fs');
+const { Client } = require('pg')
 const Logger = require('./Logger');
 
 class SubscriptionsDB {
-	constructor (filepath) {
-		this.dataPath = filepath;
-		this.data = JSON.parse(fs.readFileSync(this.dataPath));
-		this.dirty = false;
-		this.hashTable = this.CreateHashTable();
-		this.saveInterval = setInterval(() => {
-			this.SaveDB();
-		}, 1000 * 5);
+	constructor (setting) {
+		this.table = setting.table,
+		this.noticedTable = setting.noticedTable,
+		
+		// setup client
+		this.client = new Client(setting.clientSetting)
+		this.client.connect()
+		
+		this.cache = []
+		this.unNoticedCache = []
+		this.noticedCache = []
+		this.nicknameCache = []
+		
+		this.isDirty = true
+		this.isNoticedCacheDirty = true
+		this.noticedEntryMaximumAllowance = 10
+
+		this.lastUpdateTime = Date.now()
+		this.cacheLiveTime = 1000 * 30
+		
+		this.queue = []
+		this.addEntryQueue = []
+
+		this.UpdateCache()
+
+		//setInterval(this.UpdateCache.bind(this), 1000 * 30);
+
+		setInterval(this.DealQuery.bind(this), 1000 * 0.1);
+		setInterval(this.DealAddEntry.bind(this), 5);
+
+		setInterval(
+			() => {
+				if ((this.queue.length + this.addEntryQueue.length) == 0) return ;
+				Logger.log({ level: 'info', message: `Queue = ${this.queue.length}, AddEntryQueue = ${this.addEntryQueue.length}` })
+			}, 1000 * 5)
 	}
 
-	CreateHashId (typeId, nickname, entry) {
-		return `${this.data.types[typeId]}_${nickname}_${entry.title}_${entry.href}_${entry.img}`;
-	}
-
-	CreateHashTable () {
-		const hash = [];
-		this.data.container.map((e, index) => {
-			e.list.map((e2, index2) => {
-				let hashId = this.CreateHashId(e.typeId, e.nickname, e2);
-				hash.push(hashId);
+	async MoveNoticedEntryToNoticedTable()
+	{
+		const query = {
+			text: `WITH moved AS ( DELETE FROM ${this.table} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.noticedTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
+			values: [],
+		}
+		
+		const func = (option) =>
+		{
+			return new Promise((resolve, reject) =>
+			{	
+				this.client.query(option, (err, res) => resolve(res))
 			});
-		});
-		Logger.log({
-			level: 'info',
-			message: `Mapped ${hash.length} Hashes.`
+		}
+		
+		const result = await func(query)
+		
+		return result
+	}
+	
+	async UpdateCache()
+	{
+		this.isDirty = true
+
+		Logger.log({ level: 'info', message: 'Read DB' })
+
+		const func = (option) =>
+		{
+			return new Promise((resolve, reject) =>
+			{	
+				this.client.query(option, (err, res) => resolve(res))
+			});
+		}
+		
+		let query = {
+			text: ``,
+			values: [],
+		}
+		let result = null
+		
+		let difference = this.cache.length - this.unNoticedCache.length
+		if (difference >= this.noticedEntryMaximumAllowance) {
+			Logger.log({ level: 'info', message: `Detect noticed entry count ${difference} exceeds noticed_Entry_Maximum_Allowance, start moving noticed entry to noticedTable.` })
+			this.isNoticedCacheDirty =  true
+			await this.MoveNoticedEntryToNoticedTable()
+		}
+		
+		query = {
+			text: `SELECT * FROM ${this.table};`,
+			values: [],
+		}
+		result = await func(query);
+		this.cache = result.rows
+		
+		query = {
+			text: `SELECT * FROM ${this.table} WHERE isnoticed = false;`,
+			values: [],
+		}
+		result = await func(query);
+		this.unNoticedCache = result.rows
+		
+		const nicknames = [...this.cache, ...this.noticedCache].map(x => x.type)
+		this.nicknameCache = [...new Set(nicknames)]
+
+		if (this.noticedCache == null || this.isNoticedCacheDirty) {
+			query = {
+				text: `SELECT * FROM ${this.noticedTable};`,
+				values: [],
+			}
+			result = await func(query);
+			this.noticedCache = result.rows
+			this.isNoticedCacheDirty = false
+		}
+
+		Logger.log({ level: 'info', message: `Read DB Done. Status: (cache: ${this.cache.length}, noticed: ${this.noticedCache.length}), unNoticed: ${this.unNoticedCache.length}, nickname: ${this.nicknameCache.length}` })
+
+		this.isDirty = false
+		this.isNoticedCacheDirty = false
+	}
+
+	DealQuery()
+	{
+		if (this.isDirty) return; 
+		if (this.queue.length == 0) return;
+
+		const now = Date.now()
+		const diff = now - this.lastUpdateTime
+		if (diff > this.cacheLifeTime) {
+			this.lastUpdateTime = now
+			this.UpdateCache()
+		}
+
+		const { task, callback } = this.queue.pop();
+		this.client.query(task, (err, res) => {
+			if (err) {
+				this.queue.push(task)
+			}
+			else {
+				if (task.text.indexOf('INSERT') == 0)
+				{
+					Logger.log({
+						level: 'info',
+						message: `[${this.queue.length}] Add New Entry, title = <${task.values[0]}>`
+					});
+				}
+				else if (task.text.indexOf('UPDATE') == 0)
+				{
+					Logger.log({
+						level: 'info',
+						message: `[${this.queue.length}] Read Entry, id = <${task.values}>`
+					});
+				}
+				else {
+					Logger.log({
+						level: 'info',
+						message: `Query: [${this.queue.length}]: ${JSON.stringify(task)}`
+					});
+				}
+
+				callback(res)
+			}
 		})
-		return hash;
 	}
 
-	SaveDB () {
-		if (this.dirty) {
-			try {
-				fs.writeFileSync(this.dataPath, JSON.stringify(this.data, null, 4));
-				Logger.log({
-					level: 'info',
-					message: 'Saving File Done, Restore Dirty to Clean'
-				});
-				this.dirty = false; // Restore dirty flag
-			} catch (err) {
-				Logger.log({
-					level: 'error',
-					message: `Error when writing file, error=<${err.message}>`
-				});
-			}
-		}
+	async Query(option, prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;", postfix = "COMMIT;")
+	{
+		return new Promise((resolve, reject) => {
+			this.queue.push({ 'task': option, 'callback': resolve })
+		})
 	}
 
 	/*
-    *	Params:
-    *		containerId: container.container 中的 Id
-    *	Return
-    *		index: container.container 中的 Index
-    *
-    *	目的: 因為 Id 並非照順序排且可能會用跳的
-    *
-    *	Examples:
-    *
-    *	60
-    *		typeId	22
-    *		nickname	"鬼月あるちゅ SearchList"
-    *		list	[…]
-    *		id	60
-    *	61
-    *		typeId	20
-    *		nickname	"アルノサージュ SearchList"
-    *		list	[…]
-    *		id	62
-    *
-    */
-	MapContainerIdToIndex (containerId) {
-		let index = -1;
-		for (let i = 0, isFound = false; i < this.data.container.length; ++i) {
-			// use '==' instead of '===' to handle old id type is string, however new id type is integer
-			// eslint-disable-next-line
-			if (this.data.container[i].id == containerId) {
-				if (!isFound) {
-					isFound = true;
-					index = i;
-				} else {
-					Logger.log({
-						level: 'error',
-						message: `Duplicated Id Found: <${containerId || null}>`
-					});
-					index = -1;
-					break;
-				}
-			}
-		}
-
-		return index;
-	}
-
-	MapListIdToIndex (containerId, listId) {
-		let index = -1;
-		for (let i = 0, isFound = false; i < this.data.container[containerId].list.length; ++i) {
-			// use '==' instead of '===' to handle old id type is string, however new id type is integer
-			// eslint-disable-next-line
-			if (this.data.container[containerId].list[i].id == listId) {
-				if (!isFound) {
-					isFound = true;
-					index = i;
-				} else {
-					Logger.log({
-						level: 'error',
-						message: `Duplicated Id Found in ${containerId || null}: <${listId || null}>`
-					});
-					index = -1;
-					break;
-				}
-			}
-		}
-
-		return index;
-	}
-
-	/*
-    *	Params:
-    *		containerId: container.container 中的 Index
-    *		listId: container.container[index].list 的 Index
-    *
-    */
-	NoticeEntry (containerId, listId) {
-		const realContainerId = this.MapContainerIdToIndex(containerId);
-		const realListId = this.MapListIdToIndex(realContainerId, listId);
-		const isEntryExists = realContainerId !== -1 && this.data.container[realContainerId] && this.data.container[realContainerId].list[realListId];
+    	*	Params:
+	*		containerId: container.container 中的 Index
+	*		listId: container.container[index].list 的 Index
+	*
+	*/
+	async NoticeEntry (id) {
+		const result = await this.Query({
+			text: `UPDATE ${this.table} SET ISNOTICED = true where id = $1;`,
+			values: [ id ],
+		})
+		const isEntryExists = result.rowCount && result.rowCount > 0;
 		if (isEntryExists) {
-			this.data.container[realContainerId].list[realListId].isNoticed = true;
-			this.dirty = true;
+			const isEntryExistsInCache = this.cache.filter(x => x.id == id).length > 0
+			let title = ''
+			if (!isEntryExistsInCache) {
+				const result = await this.Query({
+					text: `SELECT * FROM ${this.table} where id = $1;`,
+					values: [ id ],
+				})
+				title = result.rows[0].title
+			}
+			else {
+				title = this.cache.filter(x => x.id == id)[0].title
+			}
+
 			Logger.log({
 				console: 'true',
 				level: 'info',
-				message: `Read ContainerId<${realContainerId}> & ListId<${realListId}>, title = ${this.data.container[realContainerId].list[realListId].title}`
+				message: `Read ContainerId <${id}>: ${title}`
 			});
 		} else {
 			Logger.log({
 				level: 'error',
-				message: `Error with ContainerId<${containerId}> & ListId<${listId}>`
+				message: `Error with ContainerId <${id}>`
 			});
 		}
 	}
 
-	NoticeEntryAll (containerId) {
-		const realContainerId = this.MapContainerIdToIndex(containerId);
-		const isContainerExists = realContainerId !== -1 && this.data.container[realContainerId];
-		if (isContainerExists) {
-			for (let i = 0; i < this.data.container[realContainerId].list.length; ++i) {
-				const current = this.data.container[realContainerId].list[i];
-				if (current.isNoticed === false) {
-					current.isNoticed = true;
-					Logger.log({
-						console: 'true',
-						level: 'info',
-						message: `Read ContainerId<${realContainerId}> & ListId<${i}>, title = ${this.data.container[realContainerId].list[i].title}`
-					});
-				}
-			}
-			this.dirty = true;
-		} else {
-			Logger.log({
-				level: 'error',
-				message: `Error with ContainerId<${containerId}>`
-			});
-		}
+	async AddEntry (args) {
+		this.addEntryQueue.push(args)
 	}
 
-	/*
-    *	Params:
-    *		containerType(string): 哪種類型的plugin的資料
-    *		nickname(string): 暱稱
-    *
-    *	E.g.:
-    *
-    *		containerType: Baidu
-    *		nickname: MMD Teiba
-    *		代表它為 百度的 MMD 貼吧
-    *
-    *	Return:
-    *
-    *		它在 container.container 中的 Index (int)
-    *
-    */
-	GetContainerId (containerType, nickname) {
-		const typeId = this.data.types.indexOf(containerType);
-		var idx = 0;
+	async DealAddEntry () {
+		
+		if (this.isDirty) { /*console.log('Detect Dirty When Try Deal AddEntry(), waiting...');*/ return; } 
+		if (this.addEntryQueue.length == 0) return;
 
-		for (idx = 0; idx < this.data.container.length; ++idx) {
-			// eslint-disable-next-line
-			if (this.data.container[idx].nickname === nickname && this.data.container[idx].typeId == typeId) {
-				break;
-			}
-		}
+		//console.log('Deal AddEntry(), length = ' + this.addEntryQueue.length);
 
-		return idx >= this.data.container.length ? -1 : idx;
-	}
-
-	/*
-    *	Params:
-    *		containerId: container.container 中的 Index
-    *		data: entry 的資料
-    *
-    *	Return:
-    *
-    *		是否存在 (bool)
-    *
-    */
-	CheckExisted (containerId, data) {
-		let typeId = this.data.container[containerId].typeId;
-		let nickname = this.data.container[containerId].nickname;
-		let hashId = this.CreateHashId(typeId, nickname, data);
-		return this.hashTable.indexOf(hashId) !== -1;
-	}
-
-	CheckContainerId (containerId, containerType, nickname) {
-		const isContainerIdNotExists = containerId === -1 || this.data.types[this.data.container[containerId].typeId] !== containerType;
-		if (isContainerIdNotExists) {
-			// type does not exists, create new type
-			Logger.log({
-				level: 'info',
-				message: `mapping ${containerType} ${nickname} to ${containerId} Failed. Create new this.data.container`
-			});
-
-			let matchedTypeId = 0;
-			for (matchedTypeId = 0; matchedTypeId < this.data.types.length; ++matchedTypeId) {
-				if (this.data.types[matchedTypeId] === containerType) {
-					break;
-				}
-			}
-
-			if (matchedTypeId >= this.data.types.length) {
-				this.data.types.push(containerType);
-			}
-
-			let newId = 0;
-			if (this.data.container.length > 0) {
-				newId = parseInt(this.data.container[this.data.container.length - 1].id) + 1;
-			}
-
-			this.data.container.push({
-				'typeId': matchedTypeId,
-				'nickname': nickname,
-				'list': [],
-				'id': newId
-			});
-
-			return this.GetContainerId(containerType, nickname);
-		}
-
-		return containerId;
-	}
-
-	AddEntry (args) {
-		const { containerType = -1, nickname = '', data = {} } = args;
-		if (containerType === -1 || nickname === '' || data === {}) {
+		const args = this.addEntryQueue.pop();
+		
+		const { containerType = '', nickname = '', data = {} } = args;
+		if (containerType === '' || nickname === '' || data === {}) {
 			Logger.log({
 				level: 'error',
 				message: `Invalid Entry, entry = ${JSON.stringify(args)}`
 			});
 			return 'Invalid Entry';
 		}
-		const containerId = this.CheckContainerId(this.GetContainerId(containerType, nickname), containerType, nickname);
-		const existed = this.CheckExisted(containerId, data);
-		const isValid = data && data.title && data.href && data.img;
 
-		if (isValid && !existed) {
-			this.dirty = true;
 
-			/*	取得要新增的 Entry 的 Id 應該是多少
-            *
-            * 	由於 此 Id 不一定會是 目前 list 的長度，所以用比較麻煩的方法取得
-            *
-            *	(即使手動刪出中間幾個 entry，id 還是會繼續 increment 下去，不會蓋到之前的資料)
-            */
-			const lastDataInContainer = this.data.container[containerId].list[this.data.container[containerId].list.length - 1];
+		// this.cache may not be ready
 
-			// 如果剛剛才建立這類型，設定data.id = 0
-			data.id = (lastDataInContainer) ? parseInt(lastDataInContainer.id) + 1 : 0;
-
-			this.data.container[containerId].list.push(data);
-
-			let typeId = this.data.container[containerId].typeId;
-			let nickname = this.data.container[containerId].nickname;
-			let hashId = this.CreateHashId(typeId, nickname, data);
-			this.hashTable.push(hashId);
-
+		let existed = this.cache.filter(x => 
+				x.title == data.title &&
+				x.nickname == nickname &&
+				x.href == data.href &&
+				x.img == data.img
+			).length > 0
+			||
+			this.noticedCache.filter(x => 
+				x.title == data.title &&
+				x.nickname == nickname &&
+				x.href == data.href &&
+				x.img == data.img
+			).length > 0;
+		/*if (existed == false) {
+			const result = await this.Query({
+				text: `SELECT * FROM ${this.table} WHERE nickname = $1 AND title = $2 AND href = $3 AND img = $4;`,
+				values: [ nickname, data.title, data.href, data.img ],
+			})
+			existed = result.rowCount && result.rowCount > 0;
+		}*/
+		/*else { 
 			Logger.log({
 				level: 'info',
-				message: `Add New Entry, title = <${data.title}>`
+				message: `Detect existed Entry in Cache: ${this.cache.filter(x =>
+		                        x.title == data.title &&
+		                        x.nickname == nickname &&
+		                        x.href == data.href &&
+		                        x.img == data.img
+		                        )[0].title}, Skip.`
 			});
+		}*/
+
+		const isValid = data && data.title && data.href && data.img;
+
+		if (isValid != null && !existed) {
+			this.Query({
+				text: `INSERT INTO ${this.table} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.table} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 );`,
+				values: [ data.title, data.href, data.img, false, containerType, nickname, data.title, data.href, data.img, containerType, nickname ],
+			})
 		} else {
 			if (existed) {
 				Logger.log({
@@ -312,16 +295,52 @@ class SubscriptionsDB {
 		}
 	}
 
-	GetContainerTypes () {
-		return Object.assign({}, this.data.types);
+	async ConvertToOldFormat(result)
+	{
+		const types = await this.GetContainerTypes()
+		const nicknames = [...new Set(result.map(x => x.nickname))]
+
+		const parsed = 
+		{
+			types: types,
+			container: []
+		}
+		
+		for(const row of result)
+		{
+			var typeIdx = parsed.types.indexOf(row.type);
+			var containerIdx = parsed.container.findIndex(x => x.typeId === typeIdx && x.nickname === row.nickname);
+
+			if (containerIdx == -1) {
+				parsed.container.push({
+					typeId: typeIdx,
+					nickname: row.nickname,
+					list: [ row ]
+				})
+			}
+			else
+			{
+				parsed.container[containerIdx].list.push(row)
+			}
+		}
+		
+		return parsed
 	}
 
-	GetContainer () {
-		return Object.assign({}, this.data.container);
+	async GetContainerTypes () {
+		Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.nicknameCache) });
+		return this.nicknameCache;
 	}
 
-	GetData() {
-		return Object.assign({}, this.data);
+	async GetContainer() {
+		Logger.log({ level: 'info', message: 'Get Container, Return cache' });
+		return this.ConvertToOldFormat(this.cache)
+	}
+
+	async GetUnNoticedContainers() {
+		Logger.log({ level: 'info', message: 'Get unNoticed Container, Return cache' });
+		const result = await this.client.query( { text: `SELECT * FROM ${this.table} WHERE isnoticed = false;` } )
+		return this.ConvertToOldFormat(result.rows)
 	}
 }
 

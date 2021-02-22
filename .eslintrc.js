@@ -1,17 +1,13 @@
 module.exports = {
-	"env": {
-		"browser": true,
-		"commonjs": true,
-		"es6": true,
-		"node": true
-	},
-	"extends": "standard",
-	"plugins": [],
-	"rules": {
-		"indent": ["error", "tab", {"SwitchCase": 1}],
-		"no-tabs": 0,
-		"semi": ["error", "always"],
-		"quotes": ["error", "single"],
-		"no-unused-vars": "off"
-	}
+    "env": {
+        "browser": true,
+        "commonjs": true,
+        "es2021": true
+    },
+    "extends": "eslint:recommended",
+    "parserOptions": {
+        "ecmaVersion": 12
+    },
+    "rules": {
+    }
 };
