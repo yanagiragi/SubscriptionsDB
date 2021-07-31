@@ -9,6 +9,7 @@ const morgan = require('morgan')('combined', { 'stream': Logger.stream });
 const indexRouter = require('./routes');
 const app = express();
 
+const notUseRestrictMode = process.env.restrict_mode === "false" || false
 const ipWhitelist = [
 	'::ffff:127.0.0.1' // modified your white list
 ]
@@ -21,11 +22,19 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
 app.use('/', function(req, res, next) {
+	
+	// Add notUseRestrictMode for docker
+	if (notUseRestrictMode) {
+		indexRouter(req, res, next)
+		return;
+	}
+	
 	const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress
 	if (ipWhitelist.includes(ip)) {
 		indexRouter(req, res, next)
 	}
 	else {
+		console.log(`Block ${ip}`)
 		next(createError(404))
 	}
 });
