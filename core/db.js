@@ -17,7 +17,7 @@ class SubscriptionsDB {
 		
 		this.isDirty = true
 		this.isNoticedCacheDirty = true
-		this.noticedEntryMaximumAllowance = 10
+		this.noticedEntryMaximumAllowance = 1000
 
 		this.lastUpdateTime = Date.now()
 		this.cacheLiveTime = 1000 * 30
@@ -46,59 +46,41 @@ class SubscriptionsDB {
 			values: [],
 		}
 		
-		const func = (option) =>
-		{
-			return new Promise((resolve, reject) =>
-			{	
-				this.client.query(option, (err, res) => resolve(res))
-			});
-		}
-		
-		const result = await func(query)
-		
-		return result
+		return this.QueryImmediate(query)
 	}
+
 	
 	async UpdateCache()
 	{
 		this.isDirty = true
 
 		Logger.log({ level: 'info', message: 'Read DB' })
-
-		const func = (option) =>
-		{
-			return new Promise((resolve, reject) =>
-			{	
-				this.client.query(option, (err, res) => resolve(res))
-			});
-		}
 		
-		let query = {
-			text: ``,
-			values: [],
-		}
+		let query = {text: ``, values: []}
 		let result = null
-		
-		let difference = this.cache.length - this.unNoticedCache.length
-		if (difference >= this.noticedEntryMaximumAllowance) {
-			Logger.log({ level: 'info', message: `Detect noticed entry count ${difference} exceeds noticed_Entry_Maximum_Allowance, start moving noticed entry to noticedTable.` })
-			this.isNoticedCacheDirty =  true
-			await this.MoveNoticedEntryToNoticedTable()
-		}
 		
 		query = {
 			text: `SELECT * FROM ${this.table};`,
 			values: [],
 		}
-		result = await func(query);
+		result = await this.QueryImmediate(query);
 		this.cache = result.rows
 		
 		query = {
 			text: `SELECT * FROM ${this.table} WHERE isnoticed = false;`,
 			values: [],
 		}
-		result = await func(query);
+		result = await this.QueryImmediate(query);
 		this.unNoticedCache = result.rows
+		
+		const noticedEntryCount = this.cache.length - this.unNoticedCache.length
+		Logger.log({ level: 'info', message: `cache length = ${this.cache.length}, unNoticedCache length = ${this.unNoticedCache.length}, difference = ${noticedEntryCount}` })
+		
+		if (noticedEntryCount >= this.noticedEntryMaximumAllowance) {
+			Logger.log({ level: 'info', message: `Detect noticed entry count ${noticedEntryCount} exceeds noticed_Entry_Maximum_Allowance, start moving noticed entry to noticedTable.` })
+			this.isNoticedCacheDirty =  true
+			await this.MoveNoticedEntryToNoticedTable()
+		}
 		
 		const nicknames = [...this.cache, ...this.noticedCache].map(x => x.type)
 		this.nicknameCache = [...new Set(nicknames)]
@@ -108,7 +90,7 @@ class SubscriptionsDB {
 				text: `SELECT * FROM ${this.noticedTable};`,
 				values: [],
 			}
-			result = await func(query);
+			result = await this.QueryImmediate(query);
 			this.noticedCache = result.rows
 			this.isNoticedCacheDirty = false
 		}
@@ -171,6 +153,14 @@ class SubscriptionsDB {
 		return new Promise((resolve, reject) => {
 			this.queue.push({ 'task': option, 'callback': resolve })
 		})
+	}
+	
+	async QueryImmediate(option)
+	{
+		return new Promise((resolve, reject) =>
+		{
+			this.client.query(option, (err, res) => resolve(res))
+		});
 	}
 
 	/*

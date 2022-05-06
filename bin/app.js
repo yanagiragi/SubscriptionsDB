@@ -11,8 +11,7 @@ const app = express();
 
 const notUseRestrictMode = process.env.restrict_mode === "false" || false
 const ipWhitelist = [
-	'::ffff:127.0.0.1', // modified your white list
-	'::ffff:158.101.158.182'
+    '::ffff:127.0.0.1' // modified your white list
 ]
 
 app.use(compression())
@@ -22,22 +21,21 @@ app.use(express.urlencoded({ extended: false }));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-app.use('/', function(req, res, next) {
-	
-	// Add notUseRestrictMode for docker
-	if (notUseRestrictMode) {
-		indexRouter(req, res, next)
-		return;
-	}
-	
-	const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress
-	if (ipWhitelist.includes(ip)) {
-		indexRouter(req, res, next)
-	}
-	else {
-		console.log(`Block ${ip}`)
-		next(createError(404))
-	}
+app.use('/', function (req, res, next) {
+    // Add notUseRestrictMode for docker
+    if (notUseRestrictMode) {
+        indexRouter(req, res, next)
+        return;
+    }
+
+    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress
+    if (ipWhitelist.includes(ip)) {
+        indexRouter(req, res, next)
+    }
+    else {
+        console.log(`Block ${ip}`)
+        next(createError(404))
+    }
 });
 
 // catch 404 and forward to error handler
