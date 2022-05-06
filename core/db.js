@@ -29,7 +29,7 @@ class SubscriptionsDB {
 
 		//setInterval(this.UpdateCache.bind(this), 1000 * 30);
 
-		setInterval(this.DealQuery.bind(this), 1000 * 0.1);
+		setInterval(this.DealQuery.bind(this), 1000 * 0.01);
 		setInterval(this.DealAddEntry.bind(this), 5);
 
 		setInterval(
@@ -132,6 +132,8 @@ class SubscriptionsDB {
 		}
 
 		const { task, callback } = this.queue.pop();
+		if (task == null) return;
+		Logger.log({ level: 'info', message: `Query: [${JSON.stringify(task)}]` });
 		this.client.query(task, (err, res) => {
 			if (err) {
 				this.queue.push(task)
@@ -165,6 +167,7 @@ class SubscriptionsDB {
 
 	async Query(option, prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;", postfix = "COMMIT;")
 	{
+		Logger.log({ level: 'info', message: `Query: [${JSON.stringify(option)}]` });
 		return new Promise((resolve, reject) => {
 			this.queue.push({ 'task': option, 'callback': resolve })
 		})
@@ -332,9 +335,16 @@ class SubscriptionsDB {
 		return this.nicknameCache;
 	}
 
-	async GetContainer() {
+	async GetContainers() {
 		Logger.log({ level: 'info', message: 'Get Container, Return cache' });
 		return this.ConvertToOldFormat(this.cache)
+	}
+	
+	async GetContainersWithFilter(type, nickname) {
+		Logger.log({ level: 'info', message: `Get Container with filter, Return filtered cache of [${type}] - [${nickname}]` });
+		const types = await this.GetContainerTypes()
+		const matched = this.cache.filter(x => x.type == type && x.nickname == nickname);
+		return this.ConvertToOldFormat(matched)
 	}
 
 	async GetUnNoticedContainers() {

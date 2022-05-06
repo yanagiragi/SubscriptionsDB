@@ -12,13 +12,20 @@ router.get('/', function (req, res, next) {
 
 // api for notification, no use fow now
 router.get('/containerAll', async function (req, res, next) {
-	const container = await DB.GetContainer();
+	const container = await DB.GetContainers();
 	res.send(JSON.stringify(container));
 });
 
 // api for notification, no use fow now
 router.get('/container', async function (req, res, next) {
 	const container = await DB.GetUnNoticedContainers();
+	res.send(JSON.stringify(container));
+});
+
+router.get('/container/:type/:nickname', async function (req, res, next) {
+	const type = req.params.type
+	const nickname = req.params.nickname
+	const container = await DB.GetContainersWithFilter(type, nickname);
 	res.send(JSON.stringify(container));
 });
 

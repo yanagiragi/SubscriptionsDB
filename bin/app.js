@@ -11,7 +11,8 @@ const app = express();
 
 const notUseRestrictMode = process.env.restrict_mode === "false" || false
 const ipWhitelist = [
-	'::ffff:127.0.0.1' // modified your white list
+	'::ffff:127.0.0.1', // modified your white list
+	'::ffff:158.101.158.182'
 ]
 
 app.use(compression())

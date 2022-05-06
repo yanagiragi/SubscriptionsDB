@@ -40,6 +40,11 @@ class SubscriptionsDbApi {
 		const response = await fetch(`${this.ip}/containerAll`);
 		return response.text();
 	}
+	
+	async GetContainersWithFilter (type, nickname) {
+		const response = await fetch(`${this.ip}/container/${encodeURI(type)}/${encodeURI(nickname)}`);
+		return response.text();
+	}
 
 	async GetUnNoticedContainers (args) {
 		const response = await fetch(`${this.ip}/container`);
