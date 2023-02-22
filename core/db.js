@@ -9,11 +9,18 @@ class SubscriptionsDB {
 		// setup client
 		this.client = new Client(setting.clientSetting)
 		this.client.connect()
-		
+
+		// data that stores in temporarily table
 		this.cache = []
+	
+		// unNoticed entry in this.cache
 		this.unNoticedCache = []
+
+		// data that stores in persistent table
 		this.noticedCache = []
-		this.nicknameCache = []
+		
+		// types in this.cache and this.noticedCache
+		this.typeCache = []
 		
 		this.isDirty = true
 		this.isNoticedCacheDirty = true
@@ -27,16 +34,22 @@ class SubscriptionsDB {
 
 		this.UpdateCache()
 
-		//setInterval(this.UpdateCache.bind(this), 1000 * 30);
+		setInterval(this.DealQuery.bind(this), 1000 * 0.1)
+		setInterval(this.DealAddEntry.bind(this), 1000 * 0.1)
+		setInterval(this.CheckAndLogStats.bind(this), 1000 * 5)
+	}
 
-		setInterval(this.DealQuery.bind(this), 1000 * 0.01);
-		setInterval(this.DealAddEntry.bind(this), 5);
+	CheckAndLogStats()
+	{
+		if ((this.queue.length + this.addEntryQueue.length) == 0)
+		{
+			return;
+		}
 
-		setInterval(
-			() => {
-				if ((this.queue.length + this.addEntryQueue.length) == 0) return ;
-				Logger.log({ level: 'info', message: `Queue = ${this.queue.length}, AddEntryQueue = ${this.addEntryQueue.length}` })
-			}, 1000 * 5)
+		Logger.log({
+			level: 'info', 
+			message: `Queue = ${this.queue.length}, AddEntryQueue = ${this.addEntryQueue.length}`
+		})
 	}
 
 	async MoveNoticedEntryToNoticedTable()
@@ -82,9 +95,6 @@ class SubscriptionsDB {
 			await this.MoveNoticedEntryToNoticedTable()
 		}
 		
-		const nicknames = [...this.cache, ...this.noticedCache].map(x => x.type)
-		this.nicknameCache = [...new Set(nicknames)]
-
 		if (this.noticedCache == null || this.isNoticedCacheDirty) {
 			query = {
 				text: `SELECT * FROM ${this.noticedTable};`,
@@ -95,8 +105,11 @@ class SubscriptionsDB {
 			this.isNoticedCacheDirty = false
 		}
 
-		Logger.log({ level: 'info', message: `Read DB Done. Status: (cache: ${this.cache.length}, noticed: ${this.noticedCache.length}), unNoticed: ${this.unNoticedCache.length}, nickname: ${this.nicknameCache.length}` })
-
+		const types = [...this.cache, ...this.noticedCache].map(x => x.type)
+		this.typeCache = [...new Set(types)]
+		
+		Logger.log({ level: 'info', message: `Read DB Done. Status: (cache: ${this.cache.length}, noticed: ${this.noticedCache.length}), unNoticed: ${this.unNoticedCache.length}, nickname: ${this.typeCache.length}` })
+		
 		this.isDirty = false
 		this.isNoticedCacheDirty = false
 	}
@@ -321,8 +334,8 @@ class SubscriptionsDB {
 	}
 
 	async GetContainerTypes () {
-		Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.nicknameCache) });
-		return this.nicknameCache;
+		Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.typeCache) });
+		return this.typeCache;
 	}
 
 	async GetContainers() {
