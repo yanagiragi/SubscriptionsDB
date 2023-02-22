@@ -6,6 +6,6 @@
         "password": "DB_PASSWORD",
         "port": 5432
     },
-    "table": "DB_TABLE",
-    "noticedTable": "NOTICED_DB_TABLE"
+    "mutableTable": "DB_TABLE",
+    "persistentTable": "NOTICED_DB_TABLE"
 }
