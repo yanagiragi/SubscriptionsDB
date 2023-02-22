@@ -9,5 +9,6 @@ module.exports = {
         "ecmaVersion": 12
     },
     "rules": {
+        "indent": ["error", 4]
     }
 };

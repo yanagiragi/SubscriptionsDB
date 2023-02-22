@@ -1,1 +1,0 @@
-DEBUG=SubscriptionsDB:* & ./www
