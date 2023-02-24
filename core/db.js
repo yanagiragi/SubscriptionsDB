@@ -209,35 +209,40 @@ class SubscriptionsDB {
 
     // ============= Notice APIs ============= //
 
-    async NoticeEntry (id) {
-        const result = await this.Query({
-            text: `UPDATE ${this.mutableTable} SET ISNOTICED = true where id = $1;`,
-            values: [ id ],
-        })
-        const isEntryExists = result.rowCount && result.rowCount > 0;
-        if (isEntryExists) {
-            const isEntryExistsInCache = this.mutableCache.filter(x => x.id == id).length > 0
-            let title = ''
-            if (!isEntryExistsInCache) {
-                const result = await this.Query({
-                    text: `SELECT * FROM ${this.mutableTable} where id = $1;`,
-                    values: [ id ],
-                })
-                title = result.rows[0].title
-            }
-            else {
-                title = this.mutableCache.filter(x => x.id == id)[0].title
-            }
+    async NoticeEntry(id) {
 
+        const matched = this.mutableCache.filter(x => x.id == id)?.[0]
+        if (matched == null) {
+            Logger.log({
+                level: 'warning',
+                message: `Detect ${id} does not exist in mutableCache.`
+            });
+        }
+        else {
+            matched.isNoticed = true
+
+            // update this.unNoticedEntriesCache
+            const idx = this.unNoticedEntriesCache?.findIndex(x => x.id == id) ?? -1
+            if (idx != -1) {
+                this.unNoticedEntriesCache.splice(idx, 1)
+            }
+        }
+
+        try {
+            await this.Query({
+                text: `UPDATE ${this.mutableTable} SET ISNOTICED = true where id = $1;`,
+                values: [id],
+            })
             Logger.log({
                 console: 'true',
                 level: 'info',
-                message: `Read ContainerId <${id}>: ${title}`
+                message: `Read ContainerId <${id}>: ${matched?.title}`
             });
-        } else {
+        }
+        catch (err) {
             Logger.log({
                 level: 'error',
-                message: `Error with ContainerId <${id}>`
+                message: `Error with ContainerId <${id}>. Raw = ${JSON.stringify(err)}`
             });
         }
     }
