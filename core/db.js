@@ -16,13 +16,13 @@ class SubscriptionsDB {
         this.client.connect()
 
         // data that stores in mutable table
-        this.mutableCache = null
+        this.mutableEntries = null
 
         // unNoticed entry in this.mutableCache
-        this.unNoticedEntriesCache = null
+        this.unNoticedEntries = null
 
         // data that stores in persistent table
-        this.persistentCache = null
+        this.persistentEntries = null
 
         // types in this.mutableCache and this.persistentCache
         this.typeCache = null
@@ -30,9 +30,11 @@ class SubscriptionsDB {
         this.queue = []
         this.addEntryQueue = []
 
-        this.isDirty = false
-        this.isNoticedCacheDirty = false
-        this.noticedEntryMaximumAllowance = 1000
+        this.isMutableEntriesDirty = false
+        this.isPersistentEntriesDirty = false
+
+        // how many mutable entries will trigger move noticed entries into persistent entries
+        this.maximumMutableEntriesCount = 1000
 
         this.lastUpdateTime = Date.now()
         this.cacheLiveTime = 1000 * 30 // how often we're updating the cache
@@ -51,12 +53,12 @@ class SubscriptionsDB {
     // ============= Internal APIs ============= //
 
     CheckAndLogStats() {
-        const queueCount = this.queue.length + this.addEntryQueue.length
-        if (queueCount == 0 && this.previousQueueCount == 0) {
+        const totalQueueCount = this.queue.length + this.addEntryQueue.length
+        if (totalQueueCount == 0 && this.previousQueueCount == 0) {
             return;
         }
 
-        this.previousQueueCount = queueCount
+        this.previousQueueCount = totalQueueCount
         Logger.log({
             level: 'info',
             message: `Queue = ${this.queue.length}, AddEntryQueue = ${this.addEntryQueue.length}`
@@ -68,12 +70,11 @@ class SubscriptionsDB {
             text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
         }
-
         return this.QueryImmediate(query)
     }
 
     async UpdateCache() {
-        this.isDirty = true
+        this.isMutableEntriesDirty = true
         Logger.log({ level: 'info', message: 'Read DB' })
 
         let query = { text: ``, values: [] }
@@ -84,50 +85,53 @@ class SubscriptionsDB {
             values: [],
         }
         result = await this.QueryImmediate(query);
-        this.mutableCache = result.rows
+        this.mutableEntries = result.rows
 
         query = {
             text: `SELECT * FROM ${this.mutableTable} WHERE isnoticed = false;`,
             values: [],
         }
         result = await this.QueryImmediate(query);
-        this.unNoticedEntriesCache = result.rows
+        this.unNoticedEntries = result.rows
 
-        const noticedEntryCount = this.mutableCache.length - this.unNoticedEntriesCache.length
-        Logger.log({ level: 'info', message: `cache length = ${this.mutableCache.length}, unNoticedCache length = ${this.unNoticedEntriesCache.length}, difference = ${noticedEntryCount}` })
+        const noticedEntryCount = this.mutableEntries.length - this.unNoticedEntries.length
+        Logger.log({ level: 'info', message: `cache length = ${this.mutableEntries.length}, unNoticedCache length = ${this.unNoticedEntries.length}, difference = ${noticedEntryCount}` })
 
-        if (noticedEntryCount >= this.noticedEntryMaximumAllowance) {
+        if (noticedEntryCount >= this.maximumMutableEntriesCount) {
             Logger.log({ level: 'info', message: `Detect noticed entry count ${noticedEntryCount} exceeds noticed_Entry_Maximum_Allowance, start moving noticed entry to noticedTable.` })
-            this.isNoticedCacheDirty = true
+            this.isPersistentEntriesDirty = true
             await this.MoveNoticedEntriesToPersistentTable()
         }
 
-        if (this.persistentCache == null || this.isNoticedCacheDirty) {
+        if (this.persistentEntries == null || this.isPersistentEntriesDirty) {
             query = {
                 text: `SELECT * FROM ${this.persistentTable};`,
                 values: [],
             }
             result = await this.QueryImmediate(query);
-            this.persistentCache = result.rows
-            this.isNoticedCacheDirty = false
+            this.persistentEntries = result.rows
+            this.isPersistentEntriesDirty = false
         }
 
-        const types = [...this.mutableCache, ...this.persistentCache].map(x => x.type)
+        const types = [...this.mutableEntries, ...this.persistentEntries].map(x => x.type)
         this.typeCache = [...new Set(types)]
 
         Logger.log({
             level: 'info',
-            message: `Read DB Done. Status: (cache: ${this.mutableCache.length}, noticed: ${this.persistentCache.length}), unNoticed: ${this.unNoticedEntriesCache.length}, types: ${this.typeCache.length}`
+            message: `Read DB Done. Status: (cache: ${this.mutableEntries.length}, noticed: ${this.persistentEntries.length}), unNoticed: ${this.unNoticedEntries.length}, types: ${this.typeCache.length}`
         })
 
-        this.isDirty = false
-        this.isNoticedCacheDirty = false
+        this.isMutableEntriesDirty = false
+        this.isPersistentEntriesDirty = false
     }
 
     async Query(option) {
         // const prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;"
         // const postfix = "COMMIT;"
-        Logger.log({ level: 'info', message: `Query: [${JSON.stringify(option)}]` });
+        Logger.log({
+            level: 'info',
+            message: `Query: [${JSON.stringify(option)}]`
+        });
         return new Promise((resolve, reject) => {
             this.queue.push({
                 'task': option, 'callback': (err, res) => {
@@ -156,7 +160,7 @@ class SubscriptionsDB {
     }
 
     DealQuery() {
-        if (this.isDirty || this.queue.length == 0) {
+        if (this.isMutableEntriesDirty || this.queue.length == 0) {
             return;
         }
 
@@ -206,7 +210,7 @@ class SubscriptionsDB {
 
     async NoticeEntry(id) {
 
-        const matched = this.mutableCache.filter(x => x.id == id)?.[0]
+        const matched = this.mutableEntries.filter(x => x.id == id)?.[0]
         if (matched == null) {
             Logger.log({
                 level: 'warning',
@@ -217,9 +221,9 @@ class SubscriptionsDB {
             matched.isNoticed = true
 
             // update this.unNoticedEntriesCache
-            const idx = this.unNoticedEntriesCache?.findIndex(x => x.id == id) ?? -1
+            const idx = this.unNoticedEntries?.findIndex(x => x.id == id) ?? -1
             if (idx != -1) {
-                this.unNoticedEntriesCache.splice(idx, 1)
+                this.unNoticedEntries.splice(idx, 1)
             }
         }
 
@@ -250,8 +254,7 @@ class SubscriptionsDB {
 
     async DealAddEntry() {
 
-        if (this.isDirty) {
-            /*console.log('Detect Dirty When Try Deal AddEntry(), waiting...');*/
+        if (this.isMutableEntriesDirty) {
             return;
         }
 
@@ -278,7 +281,7 @@ class SubscriptionsDB {
         const ContainsEntry = (collection, target) => collection.some(x => matchEntry(x, target))
 
         const entryToBeAdd = Object.assign(data, { nickname });
-        const isEntryAlreadyExisted = [this.mutableCache, this.persistentCache].some(x => ContainsEntry(x, entryToBeAdd))
+        const isEntryAlreadyExisted = [this.mutableEntries, this.persistentEntries].some(x => ContainsEntry(x, entryToBeAdd))
         const isValid = data && data.title && data.href && data.img;
 
         if (isValid != null && !isEntryAlreadyExisted) {
@@ -344,18 +347,18 @@ class SubscriptionsDB {
 
     async GetContainers() {
         Logger.log({ level: 'info', message: 'Get Container, Return cache' });
-        return this.ConvertToOldFormat(this.mutableCache)
+        return this.ConvertToOldFormat(this.mutableEntries)
     }
 
     async GetContainersWithNickname(type, nickname) {
         Logger.log({ level: 'info', message: `Get Container with filter, Return filtered cache of [${type}] - [${nickname}]` });
-        const matched = this.mutableCache.filter(x => x.type == type && x.nickname == nickname);
+        const matched = this.mutableEntries.filter(x => x.type == type && x.nickname == nickname);
         return this.ConvertToOldFormat(matched)
     }
 
     async GetUnNoticedContainers() {
         Logger.log({ level: 'info', message: 'Get unNoticed Container, Return cache' });
-        return this.ConvertToOldFormat(this.unNoticedEntriesCache)
+        return this.ConvertToOldFormat(this.unNoticedEntries)
     }
 }
 
