@@ -45,8 +45,8 @@ class SubscriptionsDB {
         // update cache immediate
         this.UpdateCache()
 
-        setInterval(this.DealQuery.bind(this), 1000 * 0.1)
-        setInterval(this.DealAddEntry.bind(this), 1000 * 0.1)
+        setInterval(this.DealQuery.bind(this), 1000 * 0.01)
+        setInterval(this.DealAddEntry.bind(this), 1000 * 0.01)
         setInterval(this.CheckAndLogStats.bind(this), 1000 * 5)
     }
 
