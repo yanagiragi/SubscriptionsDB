@@ -4,15 +4,22 @@ const createError = require('http-errors');
 const bodyParser = require('body-parser');
 const Logger = require('../core/Logger');
 const morgan = require('morgan')('combined', { 'stream': Logger.stream });
+const fs = require('fs')
+const path = require('path')
+
+if (!fs.existsSync('setting.json')) {
+    console.error('Detect setting config not exist. Abort.')
+    process.exit(-1);
+}
+
+const notUseRestrictMode = process.env.restrict_mode === "false" || false
+const setting = JSON.parse(fs.readFileSync(path.join(__dirname, 'setting.json')))
+const ipWhitelist = setting.whitelists
+const port = process.env.port || 3000
 
 // Route rules
 const indexRouter = require('./routes');
 const app = express();
-
-const notUseRestrictMode = process.env.restrict_mode === "false" || false
-const ipWhitelist = [
-    '::ffff:127.0.0.1' // modified your white list
-]
 
 app.use(compression())
 app.use(morgan);
@@ -54,4 +61,5 @@ app.use(function (err, req, res, next) {
     res.send('error');
 });
 
-module.exports = app;
+app.listen(port)
+console.log(`App started listen on port: ${port}`)
