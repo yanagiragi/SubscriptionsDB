@@ -3,7 +3,7 @@ const Logger = require('./Logger');
 
 class SubscriptionsDB {
 
-    constructor (setting) {
+    constructor(setting) {
 
         // There are two tables:
         //    mutableTable: entry that is not noticed or noticed but not moved to persistentTable yet.
@@ -50,11 +50,9 @@ class SubscriptionsDB {
 
     // ============= Internal APIs ============= //
 
-    CheckAndLogStats()
-    {
+    CheckAndLogStats() {
         const queueCount = this.queue.length + this.addEntryQueue.length
-        if (queueCount == 0 && this.previousQueueCount == 0)
-        {
+        if (queueCount == 0 && this.previousQueueCount == 0) {
             return;
         }
 
@@ -65,8 +63,7 @@ class SubscriptionsDB {
         })
     }
 
-    async MoveNoticedEntriesToPersistentTable()
-    {
+    async MoveNoticedEntriesToPersistentTable() {
         const query = {
             text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
@@ -75,12 +72,11 @@ class SubscriptionsDB {
         return this.QueryImmediate(query)
     }
 
-    async UpdateCache()
-    {
+    async UpdateCache() {
         this.isDirty = true
         Logger.log({ level: 'info', message: 'Read DB' })
 
-        let query = {text: ``, values: []}
+        let query = { text: ``, values: [] }
         let result = null
 
         query = {
@@ -128,25 +124,25 @@ class SubscriptionsDB {
         this.isNoticedCacheDirty = false
     }
 
-    async Query(option)
-    {
+    async Query(option) {
         // const prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;"
         // const postfix = "COMMIT;"
         Logger.log({ level: 'info', message: `Query: [${JSON.stringify(option)}]` });
         return new Promise((resolve, reject) => {
-            this.queue.push({ 'task': option, 'callback': (err, res) => {
-                if (err) {
-                    reject(err)
+            this.queue.push({
+                'task': option, 'callback': (err, res) => {
+                    if (err) {
+                        reject(err)
+                    }
+                    else {
+                        resolve(res)
+                    }
                 }
-                else {
-                    resolve(res)
-                }
-            } })
+            })
         })
     }
 
-    async QueryImmediate(option)
-    {
+    async QueryImmediate(option) {
         return new Promise((resolve, reject) => {
             this.client.query(option, (err, res) => {
                 if (err) {
@@ -159,8 +155,7 @@ class SubscriptionsDB {
         });
     }
 
-    DealQuery()
-    {
+    DealQuery() {
         if (this.isDirty || this.queue.length == 0) {
             return;
         }
@@ -249,18 +244,18 @@ class SubscriptionsDB {
 
     // ============= Add APIs ============= //
 
-    async AddEntry (args) {
+    async AddEntry(args) {
         this.addEntryQueue.push(args)
     }
 
-    async DealAddEntry () {
+    async DealAddEntry() {
 
         if (this.isDirty) {
             /*console.log('Detect Dirty When Try Deal AddEntry(), waiting...');*/
             return;
         }
 
-        if (this.addEntryQueue.length == 0){
+        if (this.addEntryQueue.length == 0) {
             return;
         }
 
@@ -276,20 +271,20 @@ class SubscriptionsDB {
 
         const matchEntry = (source, target) => {
             return source.title == target.title &&
-            source.nickname == target.nickname &&
-            source.href == target.href &&
-            source.img == target.img
+                source.nickname == target.nickname &&
+                source.href == target.href &&
+                source.img == target.img
         }
         const ContainsEntry = (collection, target) => collection.some(x => matchEntry(x, target))
 
-        const entryToBeAdd = Object.assign(data, {nickname});
+        const entryToBeAdd = Object.assign(data, { nickname });
         const isEntryAlreadyExisted = [this.mutableCache, this.persistentCache].some(x => ContainsEntry(x, entryToBeAdd))
         const isValid = data && data.title && data.href && data.img;
 
         if (isValid != null && !isEntryAlreadyExisted) {
             this.Query({
                 text: `INSERT INTO ${this.mutableTable} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.mutableTable} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 );`,
-                values: [ data.title, data.href, data.img, false, containerType, nickname, data.title, data.href, data.img, containerType, nickname ],
+                values: [data.title, data.href, data.img, false, containerType, nickname, data.title, data.href, data.img, containerType, nickname],
             })
         } else {
             if (isEntryAlreadyExisted) {
@@ -315,8 +310,7 @@ class SubscriptionsDB {
 
     // ============= Get APIs =============
 
-    async ConvertToOldFormat(result)
-    {
+    async ConvertToOldFormat(result) {
         const types = await this.GetContainerTypes()
         const parsed =
         {
@@ -324,8 +318,7 @@ class SubscriptionsDB {
             container: []
         }
 
-        for(const row of result)
-        {
+        for (const row of result) {
             var typeIdx = parsed.types.indexOf(row.type);
             var containerIdx = parsed.container.findIndex(x => x.typeId === typeIdx && x.nickname === row.nickname);
 
@@ -333,11 +326,10 @@ class SubscriptionsDB {
                 parsed.container.push({
                     typeId: typeIdx,
                     nickname: row.nickname,
-                    list: [ row ]
+                    list: [row]
                 })
             }
-            else
-            {
+            else {
                 parsed.container[containerIdx].list.push(row)
             }
         }
@@ -345,7 +337,7 @@ class SubscriptionsDB {
         return parsed
     }
 
-    async GetContainerTypes () {
+    async GetContainerTypes() {
         Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.typeCache) });
         return this.typeCache;
     }

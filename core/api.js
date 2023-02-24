@@ -1,11 +1,11 @@
 const fetch = require('node-fetch');
 
 class SubscriptionsDbApi {
-    constructor (ip) {
+    constructor(ip) {
         this.ip = ip;
     }
 
-    async AddEntry (args) {
+    async AddEntry(args) {
         const { containerType = '', nickname = '', data = {} } = args;
         if (containerType === '' || nickname === '' || data === {}) {
             throw new Error(`Invalid AddEntry: ${JSON.stringify(args)}`);
@@ -18,7 +18,7 @@ class SubscriptionsDbApi {
         return response.text();
     }
 
-    async NoticeEntry (args) {
+    async NoticeEntry(args) {
         const { id = -1 } = args;
         if (id === -1) {
             throw new Error(`Invalid NoticeEntry: ${JSON.stringify(args)}`);
@@ -27,7 +27,7 @@ class SubscriptionsDbApi {
         return response.text();
     }
 
-    async NoticeEntryAll (args) {
+    async NoticeEntryAll(args) {
         const { listIds = [] } = args;
         let responses = []
         for (const listId of listIds) {
@@ -36,17 +36,17 @@ class SubscriptionsDbApi {
         return responses.join(',')
     }
 
-    async GetContainers () {
+    async GetContainers() {
         const response = await fetch(`${this.ip}/containerAll`);
         return response.text();
     }
 
-    async GetContainersWithFilter (type, nickname) {
+    async GetContainersWithFilter(type, nickname) {
         const response = await fetch(`${this.ip}/container/${encodeURI(type)}/${encodeURI(nickname)}`);
         return response.text();
     }
 
-    async GetUnNoticedContainers (args) {
+    async GetUnNoticedContainers(args) {
         const response = await fetch(`${this.ip}/container`);
         return response.text();
     }

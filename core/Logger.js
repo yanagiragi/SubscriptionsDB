@@ -29,7 +29,7 @@ const logger = createLogger({
 })
 
 logger.stream = {
-    write: function(message, encoding){
+    write: function (message, encoding) {
         logger.log({
             level: 'debug',
             message: `Express: <${message.trim()}>`
