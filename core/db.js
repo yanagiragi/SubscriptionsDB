@@ -37,7 +37,7 @@ class SubscriptionsDB {
         this.maximumMutableEntriesCount = 1000
 
         this.lastUpdateTime = Date.now()
-        this.cacheLiveTime = 1000 * 30 // how often we're updating the cache
+        this.cacheLifeTime = 1000 * 30 // how often we're updating the cache
 
         // flags for log stats
         this.previousQueueCount = 0
@@ -169,6 +169,11 @@ class SubscriptionsDB {
         if (diff > this.cacheLifeTime) {
             this.lastUpdateTime = now
             this.UpdateCache()
+            return
+        }
+
+        if (this.isMutableEntriesDirty || this.isPersistentEntriesDirty) {
+            return
         }
 
         const { task, callback } = this.queue.pop();
