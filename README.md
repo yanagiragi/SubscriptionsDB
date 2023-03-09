@@ -1,33 +1,9 @@
 # SubscriptionsDB
 
-### Run Server
+SubscriptionsDB is the backend part of my personal crawler. It is responsible for application logic (CRUD) above crawled data.
 
-```bash
-cd bin && sh run.sh
-```
+* For storage part, we used to store data as json file, now changed to postgres for performance & stability.
 
-### Data Format (data/container.json)
+* We design two tables to store the crawled result. One act as temporarily storage to store unread crawled results, another act as persistent storage since the read data is never change to unread. The read data is stored to determine a crawl result is new or not and to reflect how the information changes in a certain amount of time.
 
-```
-{
-  "types": [
-    "baidu"
-  ],
-  "container": [
-    {
-      "id": 0, // id != container 中的 index, 因為可能會有跳號的情形 (例如: id 不連續)
-      "typeId" : 1, // 對應 types 中的 "baidu"
-      "nickName": "MMD Teiba",
-      "list" : [
-        {
-          "id": 0, // id != list 中的 index, 因為可能會有跳號的情形 (例如: id 不連續)
-          "title": "456",
-          "href": "https://123.com/456",
-          "img": "NULL", // 'NULL' 代表沒有資料
-          "isNoticed": false
-        }
-      ]
-    }
-  ]
-}
-```
+* Another alternative is use AWS RDS to store the data, however it is now deprecated due to cost.
