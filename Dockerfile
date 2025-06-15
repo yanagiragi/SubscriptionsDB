@@ -1,13 +1,11 @@
 FROM node:16
 
-WORKDIR /SubscriptionsDB
+WORKDIR /app
 
-ADD . /SubscriptionsDB
+ADD package.json /app
+ADD package-lock.json /app
 
-RUN npm install && \
-	npm install -g pm2
+RUN npm install
 
-RUN apt update && \
-	apt install -y postgresql-11
-
-CMD [ "bash", "/SubscriptionsDB/bin/docker_run.sh" ]
+# change workdir
+WORKDIR /app/bin
