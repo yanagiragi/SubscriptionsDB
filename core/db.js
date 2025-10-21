@@ -52,7 +52,7 @@ class SubscriptionsDB {
 
     // ============= Internal APIs ============= //
 
-    CheckAndLogStats() {
+    CheckAndLogStats () {
         const totalQueueCount = this.queue.length + this.addEntryQueue.length
         if (totalQueueCount == 0 && this.previousQueueCount == 0) {
             return;
@@ -65,7 +65,7 @@ class SubscriptionsDB {
         })
     }
 
-    async MoveNoticedEntriesToPersistentTable() {
+    async MoveNoticedEntriesToPersistentTable () {
         const query = {
             text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
@@ -73,7 +73,7 @@ class SubscriptionsDB {
         return this.QueryImmediate(query)
     }
 
-    async UpdateCache() {
+    async UpdateCache () {
         this.isMutableEntriesDirty = true
         Logger.log({ level: 'info', message: 'Read DB' })
 
@@ -125,7 +125,7 @@ class SubscriptionsDB {
         this.isPersistentEntriesDirty = false
     }
 
-    async Query(option) {
+    async Query (option) {
         // const prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;"
         // const postfix = "COMMIT;"
         Logger.log({
@@ -146,7 +146,7 @@ class SubscriptionsDB {
         })
     }
 
-    async QueryImmediate(option) {
+    async QueryImmediate (option) {
         return new Promise((resolve, reject) => {
             this.client.query(option, (err, res) => {
                 if (err) {
@@ -159,7 +159,7 @@ class SubscriptionsDB {
         });
     }
 
-    DealQuery() {
+    DealQuery () {
         if (this.isMutableEntriesDirty || this.queue.length == 0) {
             return;
         }
@@ -213,7 +213,7 @@ class SubscriptionsDB {
 
     // ============= Notice APIs ============= //
 
-    async NoticeEntry(id) {
+    async NoticeEntry (id) {
 
         const matched = this.mutableEntries.filter(x => x.id == id)?.[0]
         if (matched == null) {
@@ -253,11 +253,11 @@ class SubscriptionsDB {
 
     // ============= Add APIs ============= //
 
-    async AddEntry(args) {
+    async AddEntry (args) {
         this.addEntryQueue.push(args)
     }
 
-    async DealAddEntry() {
+    async DealAddEntry () {
 
         if (this.isMutableEntriesDirty) {
             return;
@@ -318,7 +318,7 @@ class SubscriptionsDB {
 
     // ============= Get APIs =============
 
-    async ConvertToOldFormat(result) {
+    async ConvertToOldFormat (result) {
         const types = await this.GetContainerTypes()
         const parsed =
         {
@@ -345,23 +345,23 @@ class SubscriptionsDB {
         return parsed
     }
 
-    async GetContainerTypes() {
+    async GetContainerTypes () {
         Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.typeCache) });
         return this.typeCache;
     }
 
-    async GetContainers() {
+    async GetContainers () {
         Logger.log({ level: 'info', message: 'Get Container, Return cache' });
         return this.ConvertToOldFormat(this.mutableEntries)
     }
 
-    async GetContainersWithNickname(type, nickname) {
+    async GetContainersWithNickname (type, nickname) {
         Logger.log({ level: 'info', message: `Get Container with filter, Return filtered cache of [${type}] - [${nickname}]` });
         const matched = this.mutableEntries.filter(x => x.type == type && x.nickname == nickname);
         return this.ConvertToOldFormat(matched)
     }
 
-    async GetUnNoticedContainers() {
+    async GetUnNoticedContainers () {
         Logger.log({ level: 'info', message: 'Get unNoticed Container, Return cache' });
         return this.ConvertToOldFormat(this.unNoticedEntries)
     }
