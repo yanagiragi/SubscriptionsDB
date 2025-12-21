@@ -10,13 +10,11 @@ router.get('/', function (req, res, next) {
     res.send('Yello. This is SubscriptionDB entry point.');
 });
 
-// api for notification, no use fow now
 router.get('/containerAll', async function (req, res, next) {
     const container = await DB.GetContainers();
     res.send(JSON.stringify(container));
 });
 
-// api for notification, no use fow now
 router.get('/container', async function (req, res, next) {
     const container = await DB.GetUnNoticedContainers();
     res.send(JSON.stringify(container));
@@ -27,12 +25,6 @@ router.get('/container/:type/:nickname', async function (req, res, next) {
     const nickname = req.params.nickname
     const container = await DB.GetContainersWithFilter(type, nickname);
     res.send(JSON.stringify(container));
-});
-
-// api for notification, no use for now
-router.get('/containerType', async function (req, res, next) {
-    const types = await DB.GetContainerTypes();
-    res.send(JSON.stringify(types));
 });
 
 router.get('/notice/:containerId', function (req, res, next) {

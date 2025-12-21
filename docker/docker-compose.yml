@@ -1,3 +1,4 @@
+name: subscriptions_db
 services:
   redis:
     image: redis:alpine

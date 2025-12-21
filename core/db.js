@@ -26,6 +26,7 @@ class SubscriptionsDB {
         // dev flag
         this.debug = process.env.SUBS_DEBUG_CACHE ?? false
         this.flushAndPreWarm = process.env.SUBS_FLUSH_CACHE ?? false
+        this.MovingTable = false
 
         // flags for log stats
         this.previousQueueCount = 0
@@ -33,7 +34,7 @@ class SubscriptionsDB {
         this.Setup(() => {
             setInterval(this.DealNoticeEntry.bind(this), 1000 * 0.01) // 10 ms
             setInterval(this.DealAddEntry.bind(this), 1000 * 0.01) // 10 ms
-            setInterval(this.CheckAndLogStats.bind(this), 1000 * 5) // 5 sec
+            setInterval(this.LogStats.bind(this), 1000 * 5) // 5 sec
 
             // max value ~= 25 days (2**31-1ms)
             // reference: https://stackoverflow.com/a/12633556
@@ -57,7 +58,7 @@ class SubscriptionsDB {
     }
 
     async DealNoticeEntry () {
-        if (this.noticedEntryQueue.length == 0) {
+        if (this.noticedEntryQueue.length == 0 || this.MovingTable) {
             return
         }
 
@@ -124,7 +125,7 @@ class SubscriptionsDB {
     }
 
     async DealAddEntry () {
-        if (this.addEntryQueue.length == 0) {
+        if (this.addEntryQueue.length == 0 || this.MovingTable) {
             return
         }
 
@@ -148,7 +149,7 @@ class SubscriptionsDB {
             return
         }
 
-        await this.AddNewEntryToCache({ id, ...args })
+        await this.AddNewEntryToCache({ id, type: containerType, nickname, ...data })
         Logger.log({
             level: 'info',
             message: `New Entry Added, id = ${id}, entry = ${JSON.stringify(args)}`
@@ -159,9 +160,8 @@ class SubscriptionsDB {
         }
     }
 
-
     // ============= Internal APIs ============= //
-    CheckAndLogStats () {
+    LogStats () {
         const totalQueueCount = this.addEntryQueue.length + this.noticedEntryQueue.length
         if (totalQueueCount == 0 && this.previousQueueCount == 0) {
             return
@@ -175,6 +175,7 @@ class SubscriptionsDB {
     }
 
     async MoveNoticedEntriesToPersistentTable () {
+        this.MovingTable = true
         let query = {
             text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
@@ -198,6 +199,8 @@ class SubscriptionsDB {
         if (this.debug) {
             await this.LogCacheStates()
         }
+
+        this.MovingTable = false
     }
 
     async QueryImmediate (option) {
@@ -240,13 +243,13 @@ class SubscriptionsDB {
         // log cache info
         {
             const mutableStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-            const mutable = JSON.parse(mutableStr)
+            const mutable = JSON.parse(mutableStr) ?? []
 
             const unNoticedStr = await this.redisClient.get(REDIS_KEY_UNNOTICED)
-            const unNoticed = JSON.parse(unNoticedStr)
+            const unNoticed = JSON.parse(unNoticedStr) ?? []
 
             const TypeStr = await this.redisClient.get(REDIS_KEY_TYPE)
-            const type = JSON.parse(TypeStr)?.sort()
+            const type = JSON.parse(TypeStr)?.sort() ?? []
 
             const count = await this.redisClient.dbSize();
 
@@ -329,34 +332,69 @@ class SubscriptionsDB {
         await this.redisClient.set(REDIS_KEY_TYPE, JSON.stringify(types))
     }
 
-    // ============= Get APIs =============
     async GetContainerTypes () {
-        Logger.log({ level: 'info', message: `GetContainerTypes, result = ${JSON.stringify(this.typeCache)}` })
+        Logger.log({ level: 'info', message: `GetContainerTypes` })
         const cacheStr = await this.redisClient.get(REDIS_KEY_TYPE)
         const cache = JSON.parse(cacheStr)
         return cache
     }
 
+    // ============= Get APIs =============
     async GetContainers () {
         Logger.log({ level: 'info', message: 'GetContainers' })
         const cacheStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-        const container = JSON.parse(cacheStr)
-        return container
+        const cache = JSON.parse(cacheStr)
+
+        const types = await this.GetContainerTypes()
+        const container = []
+
+        for (const entry of cache) {
+            const type = entry.type
+            const typeIdx = types.indexOf(type)
+            const containerIdx = container.findIndex(x => x.typeId === typeIdx && x.nickname === entry.nickname);
+
+            if (containerIdx == -1) {
+                container.push({
+                    type,
+                    typeId: typeIdx,
+                    nickname: entry.nickname,
+                    list: [entry]
+                })
+            }
+            else {
+                container[containerIdx].list.push(entry)
+            }
+        }
+
+        for (const key in container) {
+            container[key].list = container[key].list.sort((_x, _y) => _x.title > _y.title)
+        }
+
+        return {
+            types, container
+        }
     }
 
     async GetContainersWithFilter (type, nickname) {
         Logger.log({ level: 'info', message: `GetContainersWithFilter: [${type}] - [${nickname}]` })
-        const cacheStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-        const cache = JSON.parse(cacheStr)
-        const matched = cache.filter(x => x.type == type && x.nickname == nickname)
-        return matched
+        const data = await this.GetContainers()
+        const matched = data.container.filter(x => data.types[x.typeId] == type && x.nickname == nickname)
+        return {
+            types: data.types,
+            container: matched
+        }
     }
 
     async GetUnNoticedContainers () {
         Logger.log({ level: 'info', message: 'GetUnNoticedContainers' })
-        const cacheStr = await this.redisClient.get(REDIS_KEY_UNNOTICED)
-        const cache = JSON.parse(cacheStr)
-        return cache
+        const data = await this.GetContainers()
+        for (const container of data.container) {
+            container.list = container.list.filter(x => !x.isnoticed)
+        }
+        return {
+            types: data.types,
+            container: data.container.filter(x => x.list.length > 0)
+        }
     }
 
     // ============= Caches =============
@@ -371,7 +409,6 @@ class SubscriptionsDB {
             href: args?.data?.href ?? 'unknown',
         })
     }
-
 
     async IsIdExist (id) {
         const existInCache = await this.redisClient.exists(id)
