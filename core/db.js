@@ -26,7 +26,7 @@ class SubscriptionsDB {
         // dev flag
         this.debug = process.env.SUBS_DEBUG_CACHE ?? false
         this.flushAndPreWarm = process.env.SUBS_FLUSH_CACHE ?? false
-        this.MovingTable = false
+        this.movingTable = false
 
         // flags for log stats
         this.previousQueueCount = 0
@@ -58,7 +58,7 @@ class SubscriptionsDB {
     }
 
     async DealNoticeEntry () {
-        if (this.noticedEntryQueue.length == 0 || this.MovingTable) {
+        if (this.noticedEntryQueue.length == 0 || this.movingTable) {
             return
         }
 
@@ -90,9 +90,12 @@ class SubscriptionsDB {
 
     // ============= Add APIs ============= //
     async AddEntry (args) {
+        const redisKey = this.GetRedisKey(args)
         const existInCache = await this.IsEntryExist(args)
         if (existInCache) {
-            Logger.log({ level: 'info', message: `AddEntry already exists: ${JSON.stringify(args)}` })
+            if (this.debug) {
+                Logger.log({ level: 'info', message: `[AddEntry] AddEntry already exists: ${redisKey}` })
+            }
             return
         }
 
@@ -115,24 +118,24 @@ class SubscriptionsDB {
         if (!isArgsValid) {
             Logger.log({
                 level: 'error',
-                message: `Invalid Entry, reason = ${GetInvalidReason(args)}, entry = ${JSON.stringify(args)}`
+                message: `[AddEntry] Invalid Entry, reason = ${GetInvalidReason(args)}, entry = ${JSON.stringify(args)}`
             })
             return 'Invalid Entry'
         }
 
-        Logger.log({ level: 'info', message: `AddEntry add to queue: ${JSON.stringify(args)}` })
+        Logger.log({ level: 'info', message: `[AddEntry] AddEntry add to queue: ${JSON.stringify(args)}` })
         this.addEntryQueue.push(args)
     }
 
     async DealAddEntry () {
-        if (this.addEntryQueue.length == 0 || this.MovingTable) {
+        if (this.addEntryQueue.length == 0 || this.movingTable) {
             return
         }
 
         const args = this.addEntryQueue.pop()
         const existInCache = await this.IsEntryExist(args)
         if (existInCache) {
-            Logger.log({ level: 'info', message: `AddEntry already exists: ${JSON.stringify(args)}` })
+            Logger.log({ level: 'info', message: `[DealAddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
             return
         }
 
@@ -145,14 +148,14 @@ class SubscriptionsDB {
 
         const id = result.rows?.[0]?.id
         if (!id) {
-            Logger.log({ level: 'info', message: `AddEntry already exists: ${JSON.stringify(args)}` })
+            Logger.log({ level: 'info', message: `[DealAddEntry] Unable to get id: ${JSON.stringify(args)}` })
             return
         }
 
-        await this.AddNewEntryToCache({ id, type: containerType, nickname, ...data })
+        await this.AddNewEntryToCache({ id, containerType, nickname, data })
         Logger.log({
             level: 'info',
-            message: `New Entry Added, id = ${id}, entry = ${JSON.stringify(args)}`
+            message: `[DealAddEntry] New Entry Added, id = ${id}, entry = ${JSON.stringify(args)}`
         })
 
         if (this.debug) {
@@ -175,7 +178,7 @@ class SubscriptionsDB {
     }
 
     async MoveNoticedEntriesToPersistentTable () {
-        this.MovingTable = true
+        this.movingTable = true
         let query = {
             text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
@@ -200,7 +203,7 @@ class SubscriptionsDB {
             await this.LogCacheStates()
         }
 
-        this.MovingTable = false
+        this.movingTable = false
     }
 
     async QueryImmediate (option) {
@@ -228,6 +231,8 @@ class SubscriptionsDB {
     }
 
     async Setup (callback) {
+        Logger.log({ level: 'info', message: `[Setup] debug = ${this.debug}, flushAndPreWarm = ${this.flushAndPreWarm}, MovingTable = ${this.movingTable}` })
+
         // initial clients
         await this.pgClient.connect()
         await this.redisClient.connect()
@@ -253,7 +258,7 @@ class SubscriptionsDB {
 
             const count = await this.redisClient.dbSize();
 
-            Logger.log({ level: 'info', message: `[Setup] Cache Info: type = ${type.length}, unNoticed = ${unNoticed.length}, mutable = ${mutable.length}, totalCount = ${count}` })
+            Logger.log({ level: 'info', message: `[Setup] Cache Length: type = ${type.length}, unNoticed = ${unNoticed.length}, mutable = ${mutable.length}, totalCount = ${count}` })
             Logger.log({ level: 'info', message: `[Setup] Cache Info: type = ${JSON.stringify(type)}` })
         }
 
@@ -276,6 +281,7 @@ class SubscriptionsDB {
             values: [],
         }
         let result = await this.QueryImmediate(query)
+
         const mutableTypes = result.rows.map(x => x.type)
         await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(result.rows))
 
@@ -297,6 +303,7 @@ class SubscriptionsDB {
             })
 
             await this.redisClient.set(String(entry.id), redisKey)
+            await this.redisClient.set(redisKey, 1)
 
             if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (unNoticed.length - 1)) {
                 Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${unNoticed.length + 1} mutable entry into cache` })
@@ -321,7 +328,10 @@ class SubscriptionsDB {
                     isnoticed: entry.isnoticed
                 }
             })
+
+            await this.redisClient.set(String(entry.id), redisKey)
             await this.redisClient.set(redisKey, 1)
+
             if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (result.rows.length - 1)) {
                 Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${result.rows.length + 1} persistent entry into cache` })
             }
@@ -399,9 +409,8 @@ class SubscriptionsDB {
 
     // ============= Caches =============
     GetRedisKey (args) {
-        // { id, containerType, nickname, data } -> string
+        // { containerType, nickname, data } -> string
         return JSON.stringify({
-            id: args?.id ?? -1,
             containerType: args?.containerType ?? 'unknown',
             nickname: args?.nickname ?? 'unknown',
             title: args?.data?.title ?? 'unknown',
@@ -429,6 +438,7 @@ class SubscriptionsDB {
 
         // update entry map
         await this.redisClient.set(redisKey, 1)
+        console.log(`set redisKey = ${redisKey}`)
 
         // update unnoticed cache
         const currentUnNoticedStr = await this.redisClient.get(REDIS_KEY_UNNOTICED)
@@ -445,7 +455,8 @@ class SubscriptionsDB {
         // update type
         const typeStr = await this.redisClient.get(REDIS_KEY_TYPE)
         const type = JSON.parse(typeStr)
-        if (!type.includes(args.containerType)) {
+
+        if (args.containerType && !type.includes(args.containerType)) {
             type.push(args.containerType)
             await this.redisClient.set(REDIS_KEY_TYPE, JSON.stringify(type))
             Logger.log({ level: 'info', message: `Add new type: [${args.containerType}]` })
