@@ -123,7 +123,7 @@ class SubscriptionsDB {
             return 'Invalid Entry'
         }
 
-        Logger.log({ level: 'info', message: `[AddEntry] AddEntry add to queue: ${JSON.stringify(args)}` })
+        Logger.log({ level: 'info', message: `[AddEntry] Add to queue: ${args.data.title}` })
         this.addEntryQueue.push(args)
     }
 
@@ -133,6 +133,7 @@ class SubscriptionsDB {
         }
 
         const args = this.addEntryQueue.pop()
+        const redisKey = this.GetRedisKey(args)
         const existInCache = await this.IsEntryExist(args)
         if (existInCache) {
             Logger.log({ level: 'info', message: `[DealAddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
@@ -148,14 +149,15 @@ class SubscriptionsDB {
 
         const id = result.rows?.[0]?.id
         if (!id) {
-            Logger.log({ level: 'info', message: `[DealAddEntry] Unable to get id: ${JSON.stringify(args)}` })
+            await this.redisClient.del(redisKey)
+            Logger.log({ level: 'info', message: `[DealAddEntry] Unable to get id: ${title}, cache may miss match` })
             return
         }
 
         await this.AddNewEntryToCache({ id, containerType, nickname, data })
         Logger.log({
             level: 'info',
-            message: `[DealAddEntry] New Entry Added, id = ${id}, entry = ${JSON.stringify(args)}`
+            message: `[DealAddEntry] New Entry Added, id = ${id}, entry = ${title}`
         })
 
         if (this.debug) {
@@ -288,8 +290,8 @@ class SubscriptionsDB {
         const unNoticed = result.rows.filter(x => !x.isnoticed)
         await this.redisClient.set(REDIS_KEY_UNNOTICED, JSON.stringify(unNoticed))
 
-        for (let i = 0; i < unNoticed.length; ++i) {
-            const entry = unNoticed[i]
+        for (let i = 0; i < result.rows.length; ++i) {
+            const entry = result.rows[i]
             const redisKey = this.GetRedisKey({
                 id: entry.id,
                 containerType: entry.type,
