@@ -31,6 +31,7 @@ class SubscriptionsDB {
         // flags for log stats
         this.previousQueueCount = 0
 
+        this.isReady = false
         this.Setup(() => {
             setInterval(this.DealNoticeEntry.bind(this), 1000 * 0.01) // 10 ms
             setInterval(this.DealAddEntry.bind(this), 1000 * 0.01) // 10 ms
@@ -39,6 +40,8 @@ class SubscriptionsDB {
             // max value ~= 25 days (2**31-1ms)
             // reference: https://stackoverflow.com/a/12633556
             setInterval(this.MoveNoticedEntriesToPersistentTable.bind(this), 1000 * 60 * 60 * 24 * 15) // 15 days
+
+            this.isReady = true
         })
     }
 
@@ -346,6 +349,9 @@ class SubscriptionsDB {
 
     async GetContainerTypes () {
         Logger.log({ level: 'info', message: `GetContainerTypes` })
+        if (!this.isReady) {
+            return []
+        }
         const cacheStr = await this.redisClient.get(REDIS_KEY_TYPE)
         const cache = JSON.parse(cacheStr)
         return cache
@@ -354,6 +360,9 @@ class SubscriptionsDB {
     // ============= Get APIs =============
     async GetContainers () {
         Logger.log({ level: 'info', message: 'GetContainers' })
+        if (!this.isReady) {
+            return []
+        }
         const cacheStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
         const cache = JSON.parse(cacheStr)
 
