@@ -29,7 +29,10 @@ class SubscriptionsDB {
         this.movingTable = false
 
         // flags for log stats
-        this.previousQueueCount = 0
+        this.previousQueueCount = -1
+
+        this.isDealingAddEntry = false
+        this.isDealingNoticeEntry = false
 
         this.isReady = false
         this.Setup(() => {
@@ -61,9 +64,11 @@ class SubscriptionsDB {
     }
 
     async DealNoticeEntry () {
-        if (this.noticedEntryQueue.length == 0 || this.movingTable) {
+        if (this.noticedEntryQueue.length == 0 || this.movingTable || this.isDealingNoticeEntry) {
             return
         }
+
+        this.isDealingNoticeEntry = true
 
         const id = this.noticedEntryQueue.pop()
         try {
@@ -89,6 +94,8 @@ class SubscriptionsDB {
         if (this.debug) {
             await this.LogCacheStates()
         }
+
+        this.isDealingNoticeEntry = false
     }
 
     // ============= Add APIs ============= //
@@ -126,14 +133,18 @@ class SubscriptionsDB {
             return 'Invalid Entry'
         }
 
-        Logger.log({ level: 'info', message: `[AddEntry] Add to queue: ${args.data.title}` })
+        if (this.debug) {
+            Logger.log({ level: 'info', message: `[AddEntry] Add to queue: ${args.data.title}` })
+        }
         this.addEntryQueue.push(args)
     }
 
     async DealAddEntry () {
-        if (this.addEntryQueue.length == 0 || this.movingTable) {
+        if (this.addEntryQueue.length == 0 || this.movingTable || this.isDealingAddEntry) {
             return
         }
+
+        this.isDealingAddEntry = true
 
         const args = this.addEntryQueue.pop()
         const redisKey = this.GetRedisKey(args)
@@ -166,6 +177,8 @@ class SubscriptionsDB {
         if (this.debug) {
             await this.LogCacheStates()
         }
+
+        this.isDealingAddEntry = false
     }
 
     // ============= Internal APIs ============= //
@@ -287,11 +300,20 @@ class SubscriptionsDB {
         }
         let result = await this.QueryImmediate(query)
 
+        const transformTypeToContainerType = x => ({
+            containerType: x.type,
+            nickname: x.nickname,
+            title: x.title,
+            href: x.href,
+            img: x.img,
+            isnoticed: x.isnoticed,
+        })
+
         const mutableTypes = result.rows.map(x => x.type)
-        await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(result.rows))
+        await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(result.rows.map(transformTypeToContainerType)))
 
         const unNoticed = result.rows.filter(x => !x.isnoticed)
-        await this.redisClient.set(REDIS_KEY_UNNOTICED, JSON.stringify(unNoticed))
+        await this.redisClient.set(REDIS_KEY_UNNOTICED, JSON.stringify(unNoticed.map(transformTypeToContainerType)))
 
         for (let i = 0; i < result.rows.length; ++i) {
             const entry = result.rows[i]
@@ -370,7 +392,7 @@ class SubscriptionsDB {
         const container = []
 
         for (const entry of cache) {
-            const type = entry.type
+            const type = entry.containerType
             const typeIdx = types.indexOf(type)
             const containerIdx = container.findIndex(x => x.typeId === typeIdx && x.nickname === entry.nickname);
 
@@ -398,6 +420,12 @@ class SubscriptionsDB {
 
     async GetContainersWithFilter (type, nickname) {
         Logger.log({ level: 'info', message: `GetContainersWithFilter: [${type}] - [${nickname}]` })
+        if (!this.isReady) {
+            return {
+                types: [],
+                container: []
+            }
+        }
         const data = await this.GetContainers()
         const matched = data.container.filter(x => data.types[x.typeId] == type && x.nickname == nickname)
         return {
