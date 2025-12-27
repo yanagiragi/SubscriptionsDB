@@ -151,6 +151,7 @@ class SubscriptionsDB {
         const existInCache = await this.IsEntryExist(args)
         if (existInCache) {
             Logger.log({ level: 'info', message: `[DealAddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
+            this.isDealingAddEntry = false
             return
         }
 
@@ -165,6 +166,7 @@ class SubscriptionsDB {
         if (!id) {
             await this.redisClient.del(redisKey)
             Logger.log({ level: 'info', message: `[DealAddEntry] Unable to get id: ${title}, cache may miss match` })
+            this.isDealingAddEntry = false
             return
         }
 
