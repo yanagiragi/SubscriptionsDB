@@ -210,7 +210,7 @@ class SubscriptionsDB {
             values: [],
         }
         result = await this.QueryImmediate(query)
-        await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(result.rows))
+        await this.redisClient.rPush(REDIS_KEY_MUTABLE, result.rows.map(x => JSON.stringify(x)))
 
         Logger.log({ level: 'info', message: `Cache refreshed: ${REDIS_KEY_MUTABLE}` })
 
@@ -262,8 +262,8 @@ class SubscriptionsDB {
 
         // log cache info
         {
-            const mutableStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-            const mutable = JSON.parse(mutableStr) ?? []
+            const mutableRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
+            const mutable = mutableRaw.map(x => JSON.parse(x))
 
             const unNoticed = mutable.filter(x => !x.isnoticed)
 
@@ -287,77 +287,62 @@ class SubscriptionsDB {
     }
 
     async PrewarmCache () {
+        const AddCaches = async rows => {
+            for (let i = 0; i < rows.length; ++i) {
+                const entry = rows[i]
+                const redisKey = this.GetRedisKey({
+                    id: entry.id,
+                    containerType: entry.type,
+                    nickname: entry.nickname,
+                    data: {
+                        title: entry.title,
+                        href: entry.href,
+                        img: entry.img,
+                        isnoticed: entry.isnoticed
+                    }
+                })
+
+                await this.redisClient.set(String(entry.id), redisKey)
+                await this.redisClient.set(redisKey, 1)
+
+                if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (rows.length - 1)) {
+                    Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${rows.length + 1} mutable entry into cache` })
+                }
+            }
+        }
+
         // clear redis cache
         await this.redisClient.flushDb()
 
-        let query = {
+        // update key & id cache
+        const mutableResults = await this.QueryImmediate({
             text: `SELECT * FROM ${this.mutableTable};`,
             values: [],
-        }
-        let result = await this.QueryImmediate(query)
-
-        const transformTypeToContainerType = x => ({
-            containerType: x.type,
-            nickname: x.nickname,
-            title: x.title,
-            href: x.href,
-            img: x.img,
-            isnoticed: x.isnoticed,
         })
+        await AddCaches(mutableResults.rows)
 
-        const mutableTypes = result.rows.map(x => x.type)
-        await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(result.rows.map(transformTypeToContainerType)))
-
-        for (let i = 0; i < result.rows.length; ++i) {
-            const entry = result.rows[i]
-            const redisKey = this.GetRedisKey({
-                id: entry.id,
-                containerType: entry.type,
-                nickname: entry.nickname,
-                data: {
-                    title: entry.title,
-                    href: entry.href,
-                    img: entry.img,
-                    isnoticed: entry.isnoticed
-                }
-            })
-
-            await this.redisClient.set(String(entry.id), redisKey)
-            await this.redisClient.set(redisKey, 1)
-
-            if (i % PREWARM_LOG_CHUNK_SIZE == 0) {
-                Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${unNoticed.length + 1} mutable entry into cache` })
-            }
-        }
-
-        query = {
+        const persistentResults = await this.QueryImmediate({
             text: `SELECT * FROM ${this.persistentTable};`,
             values: [],
-        }
-        result = await this.QueryImmediate(query)
-        for (let i = 0; i < result.rows.length; ++i) {
-            const entry = result.rows[i]
-            const redisKey = this.GetRedisKey({
-                id: entry.id,
-                containerType: entry.type,
-                nickname: entry.nickname,
-                data: {
-                    title: entry.title,
-                    href: entry.href,
-                    img: entry.img,
-                    isnoticed: entry.isnoticed
-                }
-            })
+        })
+        await AddCaches(persistentResults.rows)
 
-            await this.redisClient.set(String(entry.id), redisKey)
-            await this.redisClient.set(redisKey, 1)
-
-            if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (result.rows.length - 1)) {
-                Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${result.rows.length + 1} persistent entry into cache` })
+        // update mutable cache
+        await this.redisClient.rPush(REDIS_KEY_MUTABLE, mutableResults.rows.map(x => {
+            const transformed = {
+                containerType: x.type,
+                nickname: x.nickname,
+                title: x.title,
+                href: x.href,
+                img: x.img,
+                isnoticed: x.isnoticed,
             }
-        }
+            return JSON.stringify(transformed)
+        }))
 
-        const persistentTypes = result.rows.map(x => x.type)
+        // update type cache
+        const mutableTypes = mutableResults.rows.map(x => x.type)
+        const persistentTypes = persistentResults.rows.map(x => x.type)
         const types = [...new Set([mutableTypes, persistentTypes].flat())]
         await this.redisClient.set(REDIS_KEY_TYPE, JSON.stringify(types))
     }
@@ -378,8 +363,8 @@ class SubscriptionsDB {
         if (!this.isReady) {
             return []
         }
-        const cacheStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-        const cache = JSON.parse(cacheStr)
+        const cacheRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
+        const cache = cacheRaw.map(x => JSON.parse(x))
 
         const types = await this.GetContainerTypes()
         const container = []
@@ -473,10 +458,7 @@ class SubscriptionsDB {
         console.log(`set redisKey = ${redisKey}`)
 
         // update mutable cache
-        const mutableStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-        const mutable = JSON.parse(mutableStr)
-        mutable.push(args)
-        await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(mutable))
+        await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(args))
 
         // update type
         const typeStr = await this.redisClient.get(REDIS_KEY_TYPE)
@@ -496,15 +478,16 @@ class SubscriptionsDB {
         await this.redisClient.del(String(id))
 
         // update mutable cache
-        const mutableStr = await this.redisClient.get(REDIS_KEY_MUTABLE)
-        const mutable = JSON.parse(mutableStr)
-        for (let i = 0; i < mutable.length; i++) {
-            if (mutable[i].id == id) {
-                mutable[i].isnoticed = true
+        const mutableRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
+        for (let i = 0; i < mutableRaw.length; i++) {
+            const entry = JSON.parse(mutableRaw[i])
+            if (entry.id == id) {
+                const noticedEntry = Object.assign(entry, { isnoticed: true })
+                await this.redisClient.rPop(REDIS_KEY_MUTABLE, mutableRaw[i])
+                await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(noticedEntry))
                 break
             }
         }
-        await this.redisClient.set(REDIS_KEY_MUTABLE, JSON.stringify(mutable))
 
         return JSON.parse(redisKey)
     }
