@@ -1,9 +1,6 @@
 const pg = require('pg')
-const redis = require('redis')
+const Cache = require('./cache')
 const Logger = require('./Logger')
-
-const REDIS_KEY_MUTABLE = '__MUTABLE'
-const REDIS_KEY_TYPE = '__TYPE'
 
 const PREWARM_LOG_CHUNK_SIZE = 1000
 
@@ -17,10 +14,11 @@ class SubscriptionsDB {
 
         // setup client
         this.pgClient = new pg.Client(setting.clientSetting)
-        this.redisClient = redis.createClient({ url: setting.redisUrl })
 
         this.addEntryQueue = []
         this.noticedEntryQueue = []
+
+        this.cache = new Cache(setting)
 
         // dev flag
         this.debug = process.env.SUBS_DEBUG_CACHE ?? false
@@ -49,7 +47,7 @@ class SubscriptionsDB {
 
     // ============= Notice APIs ============= //
     async NoticeEntry (id) {
-        const isExist = await this.IsIdExist(id)
+        const isExist = await this.cache.IsIdExist(id)
         if (!isExist) {
             Logger.log({
                 level: 'error',
@@ -76,7 +74,7 @@ class SubscriptionsDB {
                 values: [id],
             })
 
-            const removedMetadata = await this.RemoveUnNoticedEntry(id)
+            const removedMetadata = await this.cache.RemoveEntry(id)
             Logger.log({
                 console: 'true',
                 level: 'info',
@@ -99,11 +97,10 @@ class SubscriptionsDB {
 
     // ============= Add APIs ============= //
     async AddEntry (args) {
-        const redisKey = this.GetRedisKey(args)
-        const existInCache = await this.IsEntryExist(args)
+        const existInCache = await this.cache.IsEntryExist(args)
         if (existInCache) {
             if (this.debug) {
-                Logger.log({ level: 'info', message: `[AddEntry] AddEntry already exists: ${redisKey}` })
+                Logger.log({ level: 'info', message: `[AddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
             }
             return
         }
@@ -146,8 +143,7 @@ class SubscriptionsDB {
         this.isDealingAddEntry = true
 
         const args = this.addEntryQueue.pop()
-        const redisKey = this.GetRedisKey(args)
-        const existInCache = await this.IsEntryExist(args)
+        const existInCache = await this.cache.IsEntryExist(args)
         if (existInCache) {
             Logger.log({ level: 'info', message: `[DealAddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
             this.isDealingAddEntry = false
@@ -163,13 +159,12 @@ class SubscriptionsDB {
 
         const id = result.rows?.[0]?.id
         if (!id) {
-            await this.redisClient.del(redisKey)
             Logger.log({ level: 'info', message: `[DealAddEntry] Unable to get id: ${title}, cache may miss match` })
             this.isDealingAddEntry = false
             return
         }
 
-        await this.AddNewEntryToCache({ id, containerType, nickname, data })
+        await this.cache.AddEntry({ id, containerType, nickname, data }, true)
         Logger.log({
             level: 'info',
             message: `[DealAddEntry] New Entry Added, id = ${id}, entry = ${title}`
@@ -210,9 +205,8 @@ class SubscriptionsDB {
             values: [],
         }
         result = await this.QueryImmediate(query)
-        await this.redisClient.rPush(REDIS_KEY_MUTABLE, result.rows.map(x => JSON.stringify(x)))
-
-        Logger.log({ level: 'info', message: `Cache refreshed: ${REDIS_KEY_MUTABLE}` })
+        await this.cache.AddMutable(result.rows.map(x => JSON.stringify(x)))
+        Logger.log({ level: 'info', message: `Cache refreshed` })
 
         if (this.debug) {
             await this.LogCacheStates()
@@ -226,31 +220,12 @@ class SubscriptionsDB {
         return res
     }
 
-    async LogCacheStates () {
-        Logger.log({ level: 'info', message: `===== Cache State Start ======` })
-
-        let cursor = '0'
-        let offset = 0
-        do {
-            const result = await this.redisClient.scan(cursor)
-            for (let i = 0; i < result.keys.length; ++i) {
-                const key = result.keys[i]
-                const value = await this.redisClient.get(key)
-                Logger.log({ level: 'info', message: `[${i + offset}] key = ${key}, value = ${value}` })
-            }
-            cursor = result.cursor
-            offset += result.keys.length
-        } while (cursor !== '0')
-
-        Logger.log({ level: 'info', message: `===== Cache State End ======` })
-    }
-
     async Setup (callback) {
         Logger.log({ level: 'info', message: `[Setup] debug = ${this.debug}, flushAndPreWarm = ${this.flushAndPreWarm}, MovingTable = ${this.movingTable}` })
 
         // initial clients
         await this.pgClient.connect()
-        await this.redisClient.connect()
+        await this.cache.Init()
         Logger.log({ level: 'info', message: `[Setup] Clients initialized` })
 
         // update cache
@@ -262,15 +237,10 @@ class SubscriptionsDB {
 
         // log cache info
         {
-            const mutableRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
-            const mutable = mutableRaw.map(x => JSON.parse(x))
-
+            const mutable = await this.cache.GetMutable()
             const unNoticed = mutable.filter(x => !x.isnoticed)
-
-            const TypeStr = await this.redisClient.get(REDIS_KEY_TYPE)
-            const type = JSON.parse(TypeStr)?.sort() ?? []
-
-            const count = await this.redisClient.dbSize();
+            const type = await this.cache.GetTypes()
+            const count = await this.cache.Size()
 
             Logger.log({ level: 'info', message: `[Setup] Cache Length: type = ${type.length}, unNoticed = ${unNoticed.length}, mutable = ${mutable.length}, totalCount = ${count}` })
             Logger.log({ level: 'info', message: `[Setup] Cache Info: type = ${JSON.stringify(type)}` })
@@ -281,16 +251,16 @@ class SubscriptionsDB {
         Logger.log({ level: 'info', message: `[Setup] Worker registered` })
 
         if (this.debug) {
-            await this.LogCacheStates()
+            await this.cache.LogCacheStates()
         }
         Logger.log({ level: 'info', message: `[Setup] App ready` })
     }
 
     async PrewarmCache () {
-        const AddCaches = async rows => {
+        const AddEntry = async rows => {
             for (let i = 0; i < rows.length; ++i) {
                 const entry = rows[i]
-                const redisKey = this.GetRedisKey({
+                await this.cache.AddEntry({
                     id: entry.id,
                     containerType: entry.type,
                     nickname: entry.nickname,
@@ -300,35 +270,35 @@ class SubscriptionsDB {
                         img: entry.img,
                         isnoticed: entry.isnoticed
                     }
-                })
-
-                await this.redisClient.set(String(entry.id), redisKey)
-                await this.redisClient.set(redisKey, 1)
-
+                }, false)
                 if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (rows.length - 1)) {
                     Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${rows.length + 1} mutable entry into cache` })
                 }
             }
         }
 
-        // clear redis cache
-        await this.redisClient.flushDb()
+        await this.cache.Flush()
+        Logger.log({ level: 'info', message: `[Cache] Flush cache complete` })
 
         // update key & id cache
         const mutableResults = await this.QueryImmediate({
             text: `SELECT * FROM ${this.mutableTable};`,
             values: [],
         })
-        await AddCaches(mutableResults.rows)
+        Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries...` })
+        await AddEntry(mutableResults.rows)
+        Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries done` })
 
         const persistentResults = await this.QueryImmediate({
             text: `SELECT * FROM ${this.persistentTable};`,
             values: [],
         })
-        await AddCaches(persistentResults.rows)
+        Logger.log({ level: 'info', message: `[Cache] Add persistent rows into entries...` })
+        await AddEntry(persistentResults.rows)
+        Logger.log({ level: 'info', message: `[Cache] Add persistent rows into entries done` })
 
         // update mutable cache
-        await this.redisClient.rPush(REDIS_KEY_MUTABLE, mutableResults.rows.map(x => {
+        await this.cache.AddMutable(persistentResults.rows.map(x => {
             const transformed = {
                 containerType: x.type,
                 nickname: x.nickname,
@@ -344,7 +314,7 @@ class SubscriptionsDB {
         const mutableTypes = mutableResults.rows.map(x => x.type)
         const persistentTypes = persistentResults.rows.map(x => x.type)
         const types = [...new Set([mutableTypes, persistentTypes].flat())]
-        await this.redisClient.set(REDIS_KEY_TYPE, JSON.stringify(types))
+        await this.cache.SetTypes(JSON.stringify(types))
     }
 
     async GetContainerTypes () {
@@ -352,8 +322,7 @@ class SubscriptionsDB {
         if (!this.isReady) {
             return []
         }
-        const cacheStr = await this.redisClient.get(REDIS_KEY_TYPE)
-        const cache = JSON.parse(cacheStr)
+        const cache = await this.cache.GetTypes()
         return cache
     }
 
@@ -363,9 +332,7 @@ class SubscriptionsDB {
         if (!this.isReady) {
             return []
         }
-        const cacheRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
-        const cache = cacheRaw.map(x => JSON.parse(x))
-
+        const cache = await this.cache.GetMutable()
         const types = await this.GetContainerTypes()
         const container = []
 
@@ -425,72 +392,7 @@ class SubscriptionsDB {
     }
 
     // ============= Caches =============
-    GetRedisKey (args) {
-        // { containerType, nickname, data } -> string
-        return JSON.stringify({
-            containerType: args?.containerType ?? 'unknown',
-            nickname: args?.nickname ?? 'unknown',
-            title: args?.data?.title ?? 'unknown',
-            img: args?.data?.img ?? 'NULL',
-            href: args?.data?.href ?? 'unknown',
-        })
-    }
 
-    async IsIdExist (id) {
-        const existInCache = await this.redisClient.exists(id)
-        return existInCache
-    }
-
-    async IsEntryExist (args) {
-        const redisKey = this.GetRedisKey(args)
-        const existInCache = await this.redisClient.exists(redisKey)
-        return existInCache
-    }
-
-    async AddNewEntryToCache (args) {
-        const redisKey = this.GetRedisKey(args)
-
-        // update id map
-        await this.redisClient.set(String(args.id), redisKey)
-
-        // update entry map
-        await this.redisClient.set(redisKey, 1)
-        console.log(`set redisKey = ${redisKey}`)
-
-        // update mutable cache
-        await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(args))
-
-        // update type
-        const typeStr = await this.redisClient.get(REDIS_KEY_TYPE)
-        const type = JSON.parse(typeStr)
-
-        if (args.containerType && !type.includes(args.containerType)) {
-            type.push(args.containerType)
-            await this.redisClient.set(REDIS_KEY_TYPE, JSON.stringify(type))
-            Logger.log({ level: 'info', message: `Add new type: [${args.containerType}]` })
-        }
-    }
-
-    async RemoveUnNoticedEntry (id) {
-        const redisKey = await this.redisClient.get(String(id))
-
-        // update id map
-        await this.redisClient.del(String(id))
-
-        // update mutable cache
-        const mutableRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
-        for (let i = 0; i < mutableRaw.length; i++) {
-            const entry = JSON.parse(mutableRaw[i])
-            if (entry.id == id) {
-                const noticedEntry = Object.assign(entry, { isnoticed: true })
-                await this.redisClient.rPop(REDIS_KEY_MUTABLE, mutableRaw[i])
-                await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(noticedEntry))
-                break
-            }
-        }
-
-        return JSON.parse(redisKey)
-    }
 }
 
 module.exports = SubscriptionsDB
