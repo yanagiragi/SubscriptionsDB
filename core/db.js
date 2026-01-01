@@ -32,7 +32,10 @@ class SubscriptionsDB {
         this.isDealingNoticeEntry = false
 
         this.isReady = false
-        this.Setup(() => {
+    }
+
+    async Init () {
+        return this.Setup(() => {
             setInterval(this.DealNoticeEntry.bind(this), 1000 * 0.01) // 10 ms
             setInterval(this.DealAddEntry.bind(this), 1000 * 0.01) // 10 ms
             setInterval(this.LogStats.bind(this), 1000 * 5) // 5 sec
@@ -246,14 +249,16 @@ class SubscriptionsDB {
             Logger.log({ level: 'info', message: `[Setup] Cache Info: type = ${JSON.stringify(type)}` })
         }
 
-        // register workers
-        callback()
-        Logger.log({ level: 'info', message: `[Setup] Worker registered` })
-
         if (this.debug) {
             await this.cache.LogCacheStates()
         }
+
+        // register workers
+        Logger.log({ level: 'info', message: `[Setup] Worker registered` })
+
         Logger.log({ level: 'info', message: `[Setup] App ready` })
+
+        callback()
     }
 
     async PrewarmCache () {
