@@ -77,11 +77,11 @@ class SubscriptionsDB {
                 values: [id],
             })
 
-            const removedMetadata = await this.cache.RemoveEntry(id)
+            const result = await this.cache.NoticeEntry(id)
             Logger.log({
                 console: 'true',
                 level: 'info',
-                message: `Read ${id}: [${removedMetadata?.containerType}] <${removedMetadata?.title}>`
+                message: `Read ${id}: [${result?.containerType}] <${result?.title}>`
             })
         }
         catch (err) {
@@ -244,8 +244,9 @@ class SubscriptionsDB {
             const unNoticed = mutable.filter(x => !x.isnoticed)
             const type = await this.cache.GetTypes()
             const count = await this.cache.Size()
+            const idMapCount = (count - 2) / 2 // 2 for __TYPE and __MUTABLE
 
-            Logger.log({ level: 'info', message: `[Setup] Cache Length: type = ${type.length}, unNoticed = ${unNoticed.length}, mutable = ${mutable.length}, totalCount = ${count}` })
+            Logger.log({ level: 'info', message: `[Setup] Cache Length: type = ${type.length}, mutable = ${mutable.length}, unNoticed = ${unNoticed.length}, id/entry = ${idMapCount}` })
             Logger.log({ level: 'info', message: `[Setup] Cache Info: type = ${JSON.stringify(type)}` })
         }
 
@@ -262,7 +263,7 @@ class SubscriptionsDB {
     }
 
     async PrewarmCache () {
-        const AddEntry = async rows => {
+        const AddEntry = async (rows, updateMutable) => {
             for (let i = 0; i < rows.length; ++i) {
                 const entry = rows[i]
                 await this.cache.AddEntry({
@@ -275,9 +276,10 @@ class SubscriptionsDB {
                         img: entry.img,
                         isnoticed: entry.isnoticed
                     }
-                }, false)
+                }, updateMutable, false)
                 if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (rows.length - 1)) {
-                    Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${rows.length + 1} mutable entry into cache` })
+                    const type = updateMutable ? 'mutable' : 'persistent'
+                    Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${rows.length + 1} ${type} entries into cache` })
                 }
             }
         }
@@ -291,7 +293,7 @@ class SubscriptionsDB {
             values: [],
         })
         Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries...` })
-        await AddEntry(mutableResults.rows)
+        await AddEntry(mutableResults.rows, true)
         Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries done` })
 
         const persistentResults = await this.QueryImmediate({
@@ -299,11 +301,11 @@ class SubscriptionsDB {
             values: [],
         })
         Logger.log({ level: 'info', message: `[Cache] Add persistent rows into entries...` })
-        await AddEntry(persistentResults.rows)
+        await AddEntry(persistentResults.rows, false)
         Logger.log({ level: 'info', message: `[Cache] Add persistent rows into entries done` })
 
         // update mutable cache
-        await this.cache.AddMutable(persistentResults.rows.map(x => {
+        /*await this.cache.AddMutable(persistentResults.rows.map(x => {
             const transformed = {
                 containerType: x.type,
                 nickname: x.nickname,
@@ -313,7 +315,7 @@ class SubscriptionsDB {
                 isnoticed: x.isnoticed,
             }
             return JSON.stringify(transformed)
-        }))
+        }))*/
 
         // update type cache
         const mutableTypes = mutableResults.rows.map(x => x.type)

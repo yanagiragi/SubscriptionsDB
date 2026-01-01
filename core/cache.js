@@ -150,18 +150,18 @@ class Cache {
         }
     }
 
-    async AddEntry (args, updateTypes) {
+    async AddEntry (args, updateMutable, updateTypes) {
         if (this.useRedis) {
             const redisKey = this.GetRedisKey(args)
 
-            // update id map
+            // update id/entry map
             await this.redisClient.set(String(args.id), redisKey)
-
-            // update entry map
             await this.redisClient.set(redisKey, 1)
 
             // update mutable cache
-            await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(args))
+            if (updateMutable) {
+                await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(args))
+            }
         }
         else {
             this.mutableCache.push(args)
@@ -186,12 +186,9 @@ class Cache {
         }
     }
 
-    async RemoveEntry (id) {
+    async NoticeEntry (id) {
         if (this.useRedis) {
             const redisKey = await this.redisClient.get(String(id))
-
-            // update id map
-            await this.redisClient.del(String(id))
 
             // update mutable cache
             const mutableRaw = await this.redisClient.lRange(REDIS_KEY_MUTABLE, 0, -1)
