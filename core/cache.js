@@ -195,9 +195,9 @@ class Cache {
             for (let i = 0; i < mutableRaw.length; i++) {
                 const entry = JSON.parse(mutableRaw[i])
                 if (entry.id == id) {
-                    const noticedEntry = Object.assign(entry, { isnoticed: true })
-                    await this.redisClient.rPop(REDIS_KEY_MUTABLE, mutableRaw[i])
-                    await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(noticedEntry))
+                    entry.data.isNoticed = true
+                    await this.redisClient.lRem(REDIS_KEY_MUTABLE, 0, mutableRaw[i])
+                    await this.redisClient.rPush(REDIS_KEY_MUTABLE, JSON.stringify(entry))
                     break
                 }
             }

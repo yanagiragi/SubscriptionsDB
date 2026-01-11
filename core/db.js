@@ -390,7 +390,7 @@ class SubscriptionsDB {
         Logger.log({ level: 'info', message: 'GetUnNoticedContainers' })
         const data = await this.GetContainers()
         for (const container of data.container) {
-            container.list = container.list.filter(x => !x.isNoticed)
+            container.list = container.list.filter(x => !x.data.isNoticed)
         }
         return {
             types: data.types,
