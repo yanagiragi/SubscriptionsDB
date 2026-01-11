@@ -31,13 +31,13 @@ app.use(bodyParser.json())
 app.use('/', function (req, res, next) {
     // Add notUseRestrictMode for docker
     if (notUseRestrictMode) {
-        indexRouter(req, res, next)
+        router(req, res, next)
         return
     }
 
     const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress
     if (ipWhitelist.includes(ip)) {
-        indexRouter(req, res, next)
+        router(req, res, next)
     }
     else {
         console.log(`Block ${ip}`)
