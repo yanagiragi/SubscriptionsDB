@@ -197,7 +197,7 @@ class SubscriptionsDB {
     async MoveNoticedEntriesToPersistentTable () {
         this.movingTable = true
         let query = {
-            text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
+            text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isNoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
         }
         let result = await this.QueryImmediate(query)
@@ -241,7 +241,7 @@ class SubscriptionsDB {
         // log cache info
         {
             const mutable = await this.cache.GetMutable()
-            const unNoticed = mutable.filter(x => !x.isnoticed)
+            const unNoticed = mutable.filter(x => !x.isNoticed)
             const type = await this.cache.GetTypes()
             const count = await this.cache.Size()
             const idMapCount = (count - 2) / 2 // 2 for __TYPE and __MUTABLE
@@ -274,7 +274,7 @@ class SubscriptionsDB {
                         title: entry.title,
                         href: entry.href,
                         img: entry.img,
-                        isnoticed: entry.isnoticed
+                        isNoticed: entry.isNoticed
                     }
                 }, updateMutable, false)
                 if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (rows.length - 1)) {
@@ -289,7 +289,7 @@ class SubscriptionsDB {
 
         // update key & id cache
         const mutableResults = await this.QueryImmediate({
-            text: `SELECT * FROM ${this.mutableTable};`,
+            text: `SELECT t.id, t.type, t.nickname, t.isnoticed as "isNoticed", t.title, t.href, t.img FROM ${this.mutableTable} t;`,
             values: [],
         })
         Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries...` })
@@ -390,7 +390,7 @@ class SubscriptionsDB {
         Logger.log({ level: 'info', message: 'GetUnNoticedContainers' })
         const data = await this.GetContainers()
         for (const container of data.container) {
-            container.list = container.list.filter(x => !x.isnoticed)
+            container.list = container.list.filter(x => !x.isNoticed)
         }
         return {
             types: data.types,
