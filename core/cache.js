@@ -6,7 +6,7 @@ const REDIS_KEY_TYPE = '__TYPE'
 
 class Cache {
     constructor(setting) {
-        this.useRedis = setting.redisUrl ?? true
+        this.useRedis = setting.useRedis && setting.redisUrl
         this.redisClient = redis.createClient({ url: setting.redisUrl })
 
         this.mutableCache = []
