@@ -5,7 +5,7 @@ class SubscriptionsDbApi {
         this.ip = ip;
     }
 
-    async AddEntry(args) {
+    async AddEntry (args) {
         const { containerType = '', nickname = '', data = {} } = args;
         if (containerType === '' || nickname === '' || data === {}) {
             throw new Error(`Invalid AddEntry: ${JSON.stringify(args)}`);
@@ -18,7 +18,7 @@ class SubscriptionsDbApi {
         return response.text();
     }
 
-    async NoticeEntry(args) {
+    async NoticeEntry (args) {
         const { id = -1 } = args;
         if (id === -1) {
             throw new Error(`Invalid NoticeEntry: ${JSON.stringify(args)}`);
@@ -27,7 +27,7 @@ class SubscriptionsDbApi {
         return response.text();
     }
 
-    async NoticeEntryAll(args) {
+    async NoticeEntryAll (args) {
         const { listIds = [] } = args;
         let responses = []
         for (const listId of listIds) {
@@ -36,17 +36,17 @@ class SubscriptionsDbApi {
         return responses.join(',')
     }
 
-    async GetContainers() {
+    async GetContainers () {
         const response = await fetch(`${this.ip}/containerAll`);
         return response.text();
     }
 
-    async GetContainersWithFilter(type, nickname) {
+    async GetContainersWithFilter (type, nickname) {
         const response = await fetch(`${this.ip}/container/${encodeURI(type)}/${encodeURI(nickname)}`);
         return response.text();
     }
 
-    async GetUnNoticedContainers(args) {
+    async GetUnNoticedContainers (args) {
         const response = await fetch(`${this.ip}/container`);
         return response.text();
     }
@@ -61,7 +61,7 @@ if (require.main === module) {
 
     const test = async function () {
         const entry = {
-            type: 'Baidu',
+            containerType: 'Baidu',
             nickname: 'MMD Teiba',
             data: {
                 'img': '123',
@@ -77,11 +77,11 @@ if (require.main === module) {
 
     const test1 = async function () {
         const entry = {
-            type: 'Baidu',
+            containerType: 'Baidu',
             nickname: 'MMD Teiba',
             data: {
                 'title': 'test',
-                'img': '123',
+                'img': '1234',
                 'href': '11',
                 'isNoticed': false
             }
@@ -94,7 +94,7 @@ if (require.main === module) {
 
     const test2 = async function () {
         const entry = {
-            type: 'Baidu',
+            containerType: 'Baidu',
             nickname: 'MMD Teiba 2',
             data: {
                 'title': 'test',
@@ -109,7 +109,33 @@ if (require.main === module) {
         console.log('result: ', result);
     };
 
-    test();
+    const test3 = async function () {
+        const entry = {
+            containerType: 'Baidu 4',
+            nickname: 'MMD Teiba 3',
+            data: {
+                'title': 'test 9',
+                'img': '123',
+                'href': '11',
+                'isNoticed': false
+            }
+        };
+        // outputs: 'result: OK',
+        // db logs Add new type: [Baidu 4]
+        const result = await new SubscriptionsDbApi(defaultIp).AddEntry(entry);
+        console.log('result: ', result);
+    };
+
+    const test4 = async function () {
+        const result = await new SubscriptionsDbApi(defaultIp).NoticeEntry({
+            id: 580821
+        });
+        console.log('result: ', result);
+    };
+
+    // test()
     // test1()
     // test2()
+    // test3()
+    // test4()
 }

@@ -1,370 +1,405 @@
-const { Client } = require('pg')
-const Logger = require('./Logger');
+const pg = require('pg')
+const Cache = require('./cache')
+const Logger = require('./Logger')
+
+const PREWARM_LOG_CHUNK_SIZE = 1000
 
 class SubscriptionsDB {
-
     constructor(setting) {
-
         // There are two tables:
         //    mutableTable: entry that is not noticed or noticed but not moved to persistentTable yet.
-        //    persistentTable: read-only data that has been noticed
+        //    persistentTable: read-only data that has been noticed, only used to check if an entry has already been added.
         this.mutableTable = setting.mutableTable
         this.persistentTable = setting.persistentTable
 
         // setup client
-        this.client = new Client(setting.clientSetting)
-        this.client.connect()
+        this.pgClient = new pg.Client(setting.clientSetting)
 
-        // data that stores in mutable table
-        this.mutableEntries = null
-
-        // unNoticed entry in this.mutableCache
-        this.unNoticedEntries = null
-
-        // data that stores in persistent table
-        this.persistentEntries = null
-
-        // types in this.mutableCache and this.persistentCache
-        this.typeCache = null
-
-        this.queue = []
         this.addEntryQueue = []
+        this.noticedEntryQueue = []
 
-        this.isMutableEntriesDirty = false
-        this.isPersistentEntriesDirty = false
+        this.cache = new Cache(setting)
 
-        // how many mutable entries will trigger move noticed entries into persistent entries
-        this.maximumMutableEntriesCount = 1000
-
-        this.lastUpdateTime = Date.now()
-        this.cacheLifeTime = 1000 * 30 // how often we're updating the cache
+        // dev flag
+        this.debug = process.env.SUBS_DEBUG_CACHE ?? false
+        this.flushAndPreWarm = process.env.SUBS_FLUSH_CACHE ?? false
+        this.movingTable = false
 
         // flags for log stats
-        this.previousQueueCount = 0
+        this.previousQueueCount = -1
 
-        // update cache immediate
-        this.UpdateCache()
+        this.isDealingAddEntry = false
+        this.isDealingNoticeEntry = false
 
-        setInterval(this.DealQuery.bind(this), 1000 * 0.01)
-        setInterval(this.DealAddEntry.bind(this), 1000 * 0.01)
-        setInterval(this.CheckAndLogStats.bind(this), 1000 * 5)
+        this.isReady = false
+    }
+
+    async Init () {
+        return this.Setup(() => {
+            setInterval(this.DealNoticeEntry.bind(this), 1000 * 0.01) // 10 ms
+            setInterval(this.DealAddEntry.bind(this), 1000 * 0.01) // 10 ms
+            setInterval(this.LogStats.bind(this), 1000 * 5) // 5 sec
+
+            // max value ~= 25 days (2**31-1ms)
+            // reference: https://stackoverflow.com/a/12633556
+            setInterval(this.MoveNoticedEntriesToPersistentTable.bind(this), 1000 * 60 * 60 * 24 * 15) // 15 days
+
+            this.isReady = true
+        })
+    }
+
+    // ============= Notice APIs ============= //
+    async NoticeEntry (id) {
+        const isExist = await this.cache.IsIdExist(id)
+        if (!isExist) {
+            Logger.log({
+                level: 'error',
+                message: `Detect ${id} does not exist in cache. Skipped`
+            })
+            return
+        }
+
+        Logger.log({ level: 'info', message: `NoticeEntry add to queue: [${id}]` })
+        this.noticedEntryQueue.push(id)
+    }
+
+    async DealNoticeEntry () {
+        if (this.noticedEntryQueue.length == 0 || this.movingTable || this.isDealingNoticeEntry) {
+            return
+        }
+
+        this.isDealingNoticeEntry = true
+
+        const id = this.noticedEntryQueue.pop()
+        try {
+            await this.QueryImmediate({
+                text: `UPDATE ${this.mutableTable} SET ISNOTICED = true where id = $1;`,
+                values: [id],
+            })
+
+            const result = await this.cache.NoticeEntry(id)
+            Logger.log({
+                console: 'true',
+                level: 'info',
+                message: `Read ${id}: [${result?.containerType}] <${result?.title}>`
+            })
+        }
+        catch (err) {
+            Logger.log({
+                level: 'error',
+                message: `Error with ContainerId <${id}>. err = ${err}, stack = ${err.stack}`
+            })
+        }
+
+        if (this.debug) {
+            await this.LogCacheStates()
+        }
+
+        this.isDealingNoticeEntry = false
+    }
+
+    // ============= Add APIs ============= //
+    async AddEntry (args) {
+        const existInCache = await this.cache.IsEntryExist(args)
+        if (existInCache) {
+            if (this.debug) {
+                Logger.log({ level: 'info', message: `[AddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
+            }
+            return
+        }
+
+        const GetInvalidReason = args => {
+            if (!args.data) return 'Missing data'
+            if (!args.containerType) return 'Missing containerType'
+            if (!args.nickname) return 'Missing nickname'
+            if (!args.data.title) return 'Missing data.title'
+            if (!args.data.href) return 'Missing data.hre'
+            if (!args.data.img) return 'Missing data.img'
+            return 'Unknown'
+        }
+
+        const isArgsValid = args.containerType &&
+            args.nickname &&
+            args.data &&
+            args.data.title &&
+            args.data.href &&
+            args.data.img
+        if (!isArgsValid) {
+            Logger.log({
+                level: 'error',
+                message: `[AddEntry] Invalid Entry, reason = ${GetInvalidReason(args)}, entry = ${JSON.stringify(args)}`
+            })
+            return 'Invalid Entry'
+        }
+
+        if (this.debug) {
+            Logger.log({ level: 'info', message: `[AddEntry] Add to queue: ${args.data.title}` })
+        }
+        this.addEntryQueue.push(args)
+    }
+
+    async DealAddEntry () {
+        if (this.addEntryQueue.length == 0 || this.movingTable || this.isDealingAddEntry) {
+            return
+        }
+
+        this.isDealingAddEntry = true
+
+        const args = this.addEntryQueue.pop()
+        const existInCache = await this.cache.IsEntryExist(args)
+        if (existInCache) {
+            Logger.log({ level: 'info', message: `[DealAddEntry] AddEntry already exists: ${JSON.stringify(args)}` })
+            this.isDealingAddEntry = false
+            return
+        }
+
+        const { containerType, nickname, data } = args
+        const { title, href, img } = data
+        const result = await this.QueryImmediate({
+            text: `INSERT INTO ${this.mutableTable} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.mutableTable} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 ) RETURNING id;`,
+            values: [title, href, img, false, containerType, nickname, title, href, img, containerType, nickname],
+        })
+
+        const id = result.rows?.[0]?.id
+        if (!id) {
+            Logger.log({ level: 'info', message: `[DealAddEntry] Unable to get id: ${title}, cache may miss match` })
+            this.isDealingAddEntry = false
+            return
+        }
+
+        await this.cache.AddEntry({ id, containerType, nickname, data }, true)
+        Logger.log({
+            level: 'info',
+            message: `[DealAddEntry] New Entry Added, id = ${id}, entry = ${title}`
+        })
+
+        if (this.debug) {
+            await this.LogCacheStates()
+        }
+
+        this.isDealingAddEntry = false
     }
 
     // ============= Internal APIs ============= //
-
-    CheckAndLogStats() {
-        const totalQueueCount = this.queue.length + this.addEntryQueue.length
+    LogStats () {
+        const totalQueueCount = this.addEntryQueue.length + this.noticedEntryQueue.length
         if (totalQueueCount == 0 && this.previousQueueCount == 0) {
-            return;
+            return
         }
 
         this.previousQueueCount = totalQueueCount
         Logger.log({
             level: 'info',
-            message: `Queue = ${this.queue.length}, AddEntryQueue = ${this.addEntryQueue.length}`
+            message: `AddEntryQueue = ${this.addEntryQueue.length}, NoticedEntryQueue = ${this.noticedEntryQueue.length}`
         })
     }
 
-    async MoveNoticedEntriesToPersistentTable() {
-        const query = {
-            text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
+    async MoveNoticedEntriesToPersistentTable () {
+        this.movingTable = true
+        let query = {
+            text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isNoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
         }
-        return this.QueryImmediate(query)
-    }
-
-    async UpdateCache() {
-        this.isMutableEntriesDirty = true
-        Logger.log({ level: 'info', message: 'Read DB' })
-
-        let query = { text: ``, values: [] }
-        let result = null
+        let result = await this.QueryImmediate(query)
+        Logger.log({ level: 'info', message: `Move Noticed Entries To Persistent Table.` })
 
         query = {
             text: `SELECT * FROM ${this.mutableTable};`,
             values: [],
         }
-        result = await this.QueryImmediate(query);
-        this.mutableEntries = result.rows
+        result = await this.QueryImmediate(query)
+        await this.cache.AddMutable(result.rows.map(x => JSON.stringify(x)))
+        Logger.log({ level: 'info', message: `Cache refreshed` })
 
-        query = {
-            text: `SELECT * FROM ${this.mutableTable} WHERE isnoticed = false;`,
+        if (this.debug) {
+            await this.LogCacheStates()
+        }
+
+        this.movingTable = false
+    }
+
+    async QueryImmediate (option) {
+        const res = await this.pgClient.query(option.text, option.values)
+        return res
+    }
+
+    async Setup (callback) {
+        Logger.log({ level: 'info', message: `[Setup] debug = ${this.debug}, flushAndPreWarm = ${this.flushAndPreWarm}, MovingTable = ${this.movingTable}` })
+
+        // initial clients
+        await this.pgClient.connect()
+        await this.cache.Init()
+        Logger.log({ level: 'info', message: `[Setup] Clients initialized` })
+
+        // update cache
+        if (this.flushAndPreWarm) {
+            Logger.log({ level: 'info', message: `[Setup] Start prewarm caches` })
+            await this.PrewarmCache()
+            Logger.log({ level: 'info', message: `[Setup] Cache prewarm finished` })
+        }
+
+        // log cache info
+        {
+            const mutable = await this.cache.GetMutable()
+            const unNoticed = mutable.filter(x => !x.isNoticed)
+            const type = await this.cache.GetTypes()
+            const count = await this.cache.Size()
+            const idMapCount = (count - 2) / 2 // 2 for __TYPE and __MUTABLE
+
+            Logger.log({ level: 'info', message: `[Setup] Cache Length: type = ${type.length}, mutable = ${mutable.length}, unNoticed = ${unNoticed.length}, id/entry = ${idMapCount}` })
+            Logger.log({ level: 'info', message: `[Setup] Cache Info: type = ${JSON.stringify(type)}` })
+        }
+
+        if (this.debug) {
+            await this.cache.LogCacheStates()
+        }
+
+        // register workers
+        Logger.log({ level: 'info', message: `[Setup] Worker registered` })
+
+        Logger.log({ level: 'info', message: `[Setup] App ready` })
+
+        callback()
+    }
+
+    async PrewarmCache () {
+        const AddEntry = async (rows, updateMutable) => {
+            for (let i = 0; i < rows.length; ++i) {
+                const entry = rows[i]
+                await this.cache.AddEntry({
+                    id: entry.id,
+                    containerType: entry.type,
+                    nickname: entry.nickname,
+                    data: {
+                        title: entry.title,
+                        href: entry.href,
+                        img: entry.img,
+                        isNoticed: entry.isNoticed
+                    }
+                }, updateMutable, false)
+                if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (rows.length - 1)) {
+                    const type = updateMutable ? 'mutable' : 'persistent'
+                    Logger.log({ level: 'info', message: `[Cache] Add ${i + 1}/${rows.length + 1} ${type} entries into cache` })
+                }
+            }
+        }
+
+        await this.cache.Flush()
+        Logger.log({ level: 'info', message: `[Cache] Flush cache complete` })
+
+        // update key & id cache
+        const mutableResults = await this.QueryImmediate({
+            text: `SELECT t.id, t.type, t.nickname, t.isnoticed as "isNoticed", t.title, t.href, t.img FROM ${this.mutableTable} t;`,
             values: [],
-        }
-        result = await this.QueryImmediate(query);
-        this.unNoticedEntries = result.rows
-
-        const noticedEntryCount = this.mutableEntries.length - this.unNoticedEntries.length
-        Logger.log({ level: 'info', message: `cache length = ${this.mutableEntries.length}, unNoticedCache length = ${this.unNoticedEntries.length}, difference = ${noticedEntryCount}` })
-
-        if (noticedEntryCount >= this.maximumMutableEntriesCount) {
-            Logger.log({ level: 'info', message: `Detect noticed entry count ${noticedEntryCount} exceeds noticed_Entry_Maximum_Allowance, start moving noticed entry to noticedTable.` })
-            this.isPersistentEntriesDirty = true
-            await this.MoveNoticedEntriesToPersistentTable()
-        }
-
-        if (this.persistentEntries == null || this.isPersistentEntriesDirty) {
-            query = {
-                text: `SELECT * FROM ${this.persistentTable};`,
-                values: [],
-            }
-            result = await this.QueryImmediate(query);
-            this.persistentEntries = result.rows
-            this.isPersistentEntriesDirty = false
-        }
-
-        const types = [...this.mutableEntries, ...this.persistentEntries].map(x => x.type)
-        this.typeCache = [...new Set(types)]
-
-        Logger.log({
-            level: 'info',
-            message: `Read DB Done. Status: (cache: ${this.mutableEntries.length}, noticed: ${this.persistentEntries.length}), unNoticed: ${this.unNoticedEntries.length}, types: ${this.typeCache.length}`
         })
+        Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries...` })
+        await AddEntry(mutableResults.rows, true)
+        Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries done` })
 
-        this.isMutableEntriesDirty = false
-        this.isPersistentEntriesDirty = false
-    }
-
-    async Query(option) {
-        // const prefix = "BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;"
-        // const postfix = "COMMIT;"
-        Logger.log({
-            level: 'info',
-            message: `Query: [${JSON.stringify(option)}]`
-        });
-        return new Promise((resolve, reject) => {
-            this.queue.push({
-                'task': option, 'callback': (err, res) => {
-                    if (err) {
-                        reject(err)
-                    }
-                    else {
-                        resolve(res)
-                    }
-                }
-            })
+        const persistentResults = await this.QueryImmediate({
+            text: `SELECT * FROM ${this.persistentTable};`,
+            values: [],
         })
-    }
+        Logger.log({ level: 'info', message: `[Cache] Add persistent rows into entries...` })
+        await AddEntry(persistentResults.rows, false)
+        Logger.log({ level: 'info', message: `[Cache] Add persistent rows into entries done` })
 
-    async QueryImmediate(option) {
-        return new Promise((resolve, reject) => {
-            this.client.query(option, (err, res) => {
-                if (err) {
-                    reject(err)
-                }
-                else {
-                    resolve(res)
-                }
-            })
-        });
-    }
-
-    DealQuery() {
-        if (this.isMutableEntriesDirty || this.queue.length == 0) {
-            return;
-        }
-
-        const now = Date.now()
-        const diff = now - this.lastUpdateTime
-        if (diff > this.cacheLifeTime) {
-            this.lastUpdateTime = now
-            this.UpdateCache()
-            return
-        }
-
-        if (this.isMutableEntriesDirty || this.isPersistentEntriesDirty) {
-            return
-        }
-
-        const { task, callback } = this.queue.pop();
-        if (task == null) {
-            return;
-        }
-
-        Logger.log({ level: 'info', message: `Query: [${JSON.stringify(task)}]` });
-        this.client.query(task, (err, res) => {
-            if (err) {
-                this.queue.push(task)
+        // update mutable cache
+        /*await this.cache.AddMutable(persistentResults.rows.map(x => {
+            const transformed = {
+                containerType: x.type,
+                nickname: x.nickname,
+                title: x.title,
+                href: x.href,
+                img: x.img,
+                isnoticed: x.isnoticed,
             }
-            else {
-                if (task.text.indexOf('INSERT') == 0) {
-                    Logger.log({
-                        level: 'info',
-                        message: `[${this.queue.length}] Add New Entry, title = <${task.values[0]}>`
-                    });
-                }
-                else if (task.text.indexOf('UPDATE') == 0) {
-                    Logger.log({
-                        level: 'info',
-                        message: `[${this.queue.length}] Read Entry, id = <${task.values}>`
-                    });
-                }
-                else {
-                    Logger.log({
-                        level: 'info',
-                        message: `Query: [${this.queue.length}]: ${JSON.stringify(task)}`
-                    });
-                }
+            return JSON.stringify(transformed)
+        }))*/
 
-                callback(err, res)
-            }
-        })
+        // update type cache
+        const mutableTypes = mutableResults.rows.map(x => x.type)
+        const persistentTypes = persistentResults.rows.map(x => x.type)
+        const types = [...new Set([mutableTypes, persistentTypes].flat())]
+        await this.cache.SetTypes(JSON.stringify(types))
     }
 
-    // ============= Notice APIs ============= //
-
-    async NoticeEntry(id) {
-
-        const matched = this.mutableEntries.filter(x => x.id == id)?.[0]
-        if (matched == null) {
-            Logger.log({
-                level: 'warning',
-                message: `Detect ${id} does not exist in mutableCache.`
-            });
+    async GetContainerTypes () {
+        Logger.log({ level: 'info', message: `GetContainerTypes` })
+        if (!this.isReady) {
+            return []
         }
-        else {
-            matched.isNoticed = true
-
-            // update this.unNoticedEntriesCache
-            const idx = this.unNoticedEntries?.findIndex(x => x.id == id) ?? -1
-            if (idx != -1) {
-                this.unNoticedEntries.splice(idx, 1)
-            }
-        }
-
-        try {
-            await this.Query({
-                text: `UPDATE ${this.mutableTable} SET ISNOTICED = true where id = $1;`,
-                values: [id],
-            })
-            Logger.log({
-                console: 'true',
-                level: 'info',
-                message: `Read ContainerId <${id}>: ${matched?.title}`
-            });
-        }
-        catch (err) {
-            Logger.log({
-                level: 'error',
-                message: `Error with ContainerId <${id}>. Raw = ${JSON.stringify(err)}`
-            });
-        }
-    }
-
-    // ============= Add APIs ============= //
-
-    async AddEntry(args) {
-        this.addEntryQueue.push(args)
-    }
-
-    async DealAddEntry() {
-
-        if (this.isMutableEntriesDirty) {
-            return;
-        }
-
-        if (this.addEntryQueue.length == 0) {
-            return;
-        }
-
-        const args = this.addEntryQueue.pop();
-        const { containerType = '', nickname = '', data = {} } = args;
-        if (containerType === '' || nickname === '' || data === {}) {
-            Logger.log({
-                level: 'error',
-                message: `Invalid Entry, entry = ${JSON.stringify(args)}`
-            });
-            return 'Invalid Entry';
-        }
-
-        const matchEntry = (source, target) => {
-            return source.title == target.title &&
-                source.nickname == target.nickname &&
-                source.href == target.href &&
-                source.img == target.img
-        }
-        const ContainsEntry = (collection, target) => collection.some(x => matchEntry(x, target))
-
-        const entryToBeAdd = Object.assign(data, { nickname });
-        const isEntryAlreadyExisted = [this.mutableEntries, this.persistentEntries].some(x => ContainsEntry(x, entryToBeAdd))
-        const isValid = data && data.title && data.href && data.img;
-
-        if (isValid != null && !isEntryAlreadyExisted) {
-            this.Query({
-                text: `INSERT INTO ${this.mutableTable} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.mutableTable} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 );`,
-                values: [data.title, data.href, data.img, false, containerType, nickname, data.title, data.href, data.img, containerType, nickname],
-            })
-        } else {
-            if (isEntryAlreadyExisted) {
-                Logger.log({
-                    level: 'debug',
-                    message: `Entry existed, title = <${data.title}>`
-                });
-            } else {
-                if (data) {
-                    Logger.log({
-                        level: 'error',
-                        message: `Missing entry: <${data.title || null}, ${data.href || null}, ${data.img || null}, ${data.isNoticed || null}>`
-                    });
-                } else {
-                    Logger.log({
-                        level: 'error',
-                        message: `Missing entry: <${data || null}>`
-                    });
-                }
-            }
-        }
+        const cache = await this.cache.GetTypes()
+        return cache
     }
 
     // ============= Get APIs =============
-
-    async ConvertToOldFormat(result) {
-        const types = await this.GetContainerTypes()
-        const parsed =
-        {
-            types: types,
-            container: []
+    async GetContainers () {
+        Logger.log({ level: 'info', message: 'GetContainers' })
+        if (!this.isReady) {
+            return []
         }
+        const cache = await this.cache.GetMutable()
+        const types = await this.GetContainerTypes()
+        const container = []
 
-        for (const row of result) {
-            var typeIdx = parsed.types.indexOf(row.type);
-            var containerIdx = parsed.container.findIndex(x => x.typeId === typeIdx && x.nickname === row.nickname);
+        for (const entry of cache) {
+            const type = entry.containerType
+            const typeIdx = types.indexOf(type)
+            const containerIdx = container.findIndex(x => x.typeId === typeIdx && x.nickname === entry.nickname);
 
             if (containerIdx == -1) {
-                parsed.container.push({
+                container.push({
+                    type,
                     typeId: typeIdx,
-                    nickname: row.nickname,
-                    list: [row]
+                    nickname: entry.nickname,
+                    list: [entry]
                 })
             }
             else {
-                parsed.container[containerIdx].list.push(row)
+                container[containerIdx].list.push(entry)
             }
         }
 
-        return parsed
+        for (const key in container) {
+            container[key].list = container[key].list.sort((_x, _y) => _x.title > _y.title)
+        }
+
+        return {
+            types, container
+        }
     }
 
-    async GetContainerTypes() {
-        Logger.log({ level: 'info', message: 'Get Nickname, Return cache' + JSON.stringify(this.typeCache) });
-        return this.typeCache;
+    async GetContainersWithFilter (type, nickname) {
+        Logger.log({ level: 'info', message: `GetContainersWithFilter: [${type}] - [${nickname}]` })
+        if (!this.isReady) {
+            return {
+                types: [],
+                container: []
+            }
+        }
+        const data = await this.GetContainers()
+        const matched = data.container.filter(x => data.types[x.typeId] == type && x.nickname == nickname)
+        return {
+            types: data.types,
+            container: matched
+        }
     }
 
-    async GetContainers() {
-        Logger.log({ level: 'info', message: 'Get Container, Return cache' });
-        return this.ConvertToOldFormat(this.mutableEntries)
+    async GetUnNoticedContainers () {
+        Logger.log({ level: 'info', message: 'GetUnNoticedContainers' })
+        const data = await this.GetContainers()
+        for (const container of data.container) {
+            container.list = container.list.filter(x => !x.data.isNoticed)
+        }
+        return {
+            types: data.types,
+            container: data.container.filter(x => x.list.length > 0)
+        }
     }
 
-    async GetContainersWithNickname(type, nickname) {
-        Logger.log({ level: 'info', message: `Get Container with filter, Return filtered cache of [${type}] - [${nickname}]` });
-        const matched = this.mutableEntries.filter(x => x.type == type && x.nickname == nickname);
-        return this.ConvertToOldFormat(matched)
-    }
+    // ============= Caches =============
 
-    async GetUnNoticedContainers() {
-        Logger.log({ level: 'info', message: 'Get unNoticed Container, Return cache' });
-        return this.ConvertToOldFormat(this.unNoticedEntries)
-    }
 }
 
-module.exports = SubscriptionsDB;
+module.exports = SubscriptionsDB

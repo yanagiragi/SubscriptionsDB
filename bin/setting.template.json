@@ -6,6 +6,7 @@
         "password": "DB_PASSWORD",
         "port": 5432
     },
+    "redisUrl": "redis://localhost:5555",
     "whitelists": [
         "::ffff:127.0.0.1"
     ],

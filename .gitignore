@@ -58,10 +58,15 @@ typings/
 # dotenv environment variables file
 .env
 
-data/container.json
-
-bin/setting.json
-
 # winston rotate generated files
 bin/*-audit.json
 bin/*.log*
+
+# app settings
+bin/setting.json
+data/container.json
+
+# app docker settings
+docker/data/init-sql/*.sql
+docker/data/redis-data/dump.rdb
+docker/data/pg-data/*
