@@ -390,7 +390,12 @@ class SubscriptionsDB {
         Logger.log({ level: 'info', message: 'GetUnNoticedContainers' })
         const data = await this.GetContainers()
         for (const container of data.container) {
-            container.list = container.list.filter(x => !x.data.isNoticed)
+            for (const entry of container.list) {
+                if (entry?.data?.isNoticed == null) {
+                    Logger.log({ level: 'error', message: `Detect invalid entry: ${JSON.stringify(entry)}` })
+                }
+            }
+            container.list = container.list.filter(x => x?.data?.isNoticed === false)
         }
         return {
             types: data.types,
