@@ -139,14 +139,14 @@ class Cache {
             return existInCache
         }
         else {
-            return this.mutableCache.findIndex(x => {
-                return x.containerType == args.containerType &&
-                    x.nickname == args.nickname &&
-                    x.data == args.data &&
-                    x.data.title == args.data.title &&
-                    x.data.href == args.data.href &&
-                    x.data.i == args.data.img
-            }) >= 0
+            const idx = this.mutableCache.findIndex(x =>
+                x.containerType == args.containerType &&
+                x.nickname == args.nickname &&
+                x.data.title == args.data.title &&
+                x.data.href == args.data.href &&
+                x.data.img == args.data.img
+            )
+            return idx >= 0
         }
     }
 

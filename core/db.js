@@ -22,7 +22,7 @@ class SubscriptionsDB {
 
         // dev flag
         this.debug = process.env.SUBS_DEBUG_CACHE ?? false
-        this.flushAndPreWarm = process.env.SUBS_FLUSH_CACHE ?? false
+        this.flushAndPreWarm = (!setting.useRedis || process.env.SUBS_FLUSH_CACHE) ?? false
         this.movingTable = false
 
         // flags for log stats
