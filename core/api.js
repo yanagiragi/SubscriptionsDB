@@ -66,7 +66,7 @@ if (require.main === module) {
             data: {
                 'img': '123',
                 'href': '11',
-                'isNoticed': false
+                'isnoticed': false
             }
         };
         // outputs: 'result: OK',
@@ -83,7 +83,7 @@ if (require.main === module) {
                 'title': 'test',
                 'img': '1234',
                 'href': '11',
-                'isNoticed': false
+                'isnoticed': false
             }
         };
         // outputs: 'result: OK'
@@ -100,7 +100,7 @@ if (require.main === module) {
                 'title': 'test',
                 'img': '123',
                 'href': '11',
-                'isNoticed': false
+                'isnoticed': false
             }
         };
         // outputs: 'result: OK',
@@ -117,7 +117,7 @@ if (require.main === module) {
                 'title': 'test 9',
                 'img': '123',
                 'href': '11',
-                'isNoticed': false
+                'isnoticed': false
             }
         };
         // outputs: 'result: OK',

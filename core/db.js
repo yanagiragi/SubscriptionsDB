@@ -156,7 +156,7 @@ class SubscriptionsDB {
         const { containerType, nickname, data } = args
         const { title, href, img } = data
         const result = await this.QueryImmediate({
-            text: `INSERT INTO ${this.mutableTable} (title, href, img, isNoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.mutableTable} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 ) RETURNING id;`,
+            text: `INSERT INTO ${this.mutableTable} (title, href, img, isnoticed, type, nickname) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS ( SELECT 1 FROM ${this.mutableTable} WHERE title = $7 AND href = $8 AND img = $9 AND type = $10 AND nickname = $11 ) RETURNING id;`,
             values: [title, href, img, false, containerType, nickname, title, href, img, containerType, nickname],
         })
 
@@ -197,7 +197,7 @@ class SubscriptionsDB {
     async MoveNoticedEntriesToPersistentTable () {
         this.movingTable = true
         let query = {
-            text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isNoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
+            text: `WITH moved AS ( DELETE FROM ${this.mutableTable} WHERE isnoticed = true RETURNING * ) INSERT INTO ${this.persistentTable} (id, type, nickname, title, href, img) SELECT id, type, nickname, title, href, img FROM moved;`,
             values: [],
         }
         let result = await this.QueryImmediate(query)
@@ -241,7 +241,7 @@ class SubscriptionsDB {
         // log cache info
         {
             const mutable = await this.cache.GetMutable()
-            const unNoticed = mutable.filter(x => !x.isNoticed)
+            const unNoticed = mutable.filter(x => !x.isnoticed)
             const type = await this.cache.GetTypes()
             const count = await this.cache.Size()
             const idMapCount = (count - 2) / 2 // 2 for __TYPE and __MUTABLE
@@ -274,7 +274,7 @@ class SubscriptionsDB {
                         title: entry.title,
                         href: entry.href,
                         img: entry.img,
-                        isNoticed: entry.isNoticed
+                        isnoticed: entry.isnoticed
                     }
                 }, updateMutable, false)
                 if (i % PREWARM_LOG_CHUNK_SIZE == 0 || i == (rows.length - 1)) {
@@ -289,7 +289,7 @@ class SubscriptionsDB {
 
         // update key & id cache
         const mutableResults = await this.QueryImmediate({
-            text: `SELECT t.id, t.type, t.nickname, t.isnoticed as "isNoticed", t.title, t.href, t.img FROM ${this.mutableTable} t;`,
+            text: `SELECT t.id, t.type, t.nickname, t.isnoticed as "isnoticed", t.title, t.href, t.img FROM ${this.mutableTable} t;`,
             values: [],
         })
         Logger.log({ level: 'info', message: `[Cache] Add mutable rows into entries...` })
@@ -391,11 +391,11 @@ class SubscriptionsDB {
         const data = await this.GetContainers()
         for (const container of data.container) {
             for (const entry of container.list) {
-                if (entry?.data?.isNoticed == null) {
+                if (entry?.data?.isnoticed == null) {
                     Logger.log({ level: 'error', message: `Detect invalid entry: ${JSON.stringify(entry)}` })
                 }
             }
-            container.list = container.list.filter(x => x?.data?.isNoticed === false)
+            container.list = container.list.filter(x => x?.data?.isnoticed === false)
         }
         return {
             types: data.types,
